@@ -1,43 +1,47 @@
 import { Model } from "@/types/chat";
 
 const modelColors = [
-  "#ff6482", // rose
   "#32d583", // emerald
-  "#fbbf24", // amber
   "#60a5fa", // blue
+  "#fbbf24", // amber
+  "#ff6482", // rose
 ];
 
 export const availableModels: Model[] = [
   {
-    id: "moonshotai/kimi-k2-0905",
-    name: "Kimi K2",
-    shortName: "Kimi",
-    provider: "moonshotai",
+    id: "nvidia/nemotron-3-super-120b-a12b:free",
+    name: "Nemotron 3 Super 120B",
+    shortName: "Nemotron",
+    provider: "nvidia",
     color: modelColors[0],
     isActive: false,
+    pricing: { prompt: "0", completion: "0" },
   },
   {
-    id: "google/gemini-3-pro-preview",
-    name: "Gemini 3 Pro",
-    shortName: "Gemini",
-    provider: "google",
+    id: "meta-llama/llama-3.3-70b-instruct:free",
+    name: "Llama 3.3 70B",
+    shortName: "Llama",
+    provider: "meta-llama",
     color: modelColors[1],
     isActive: false,
+    pricing: { prompt: "0", completion: "0" },
   },
   {
-    id: "anthropic/claude-haiku-4.5",
-    name: "Claude Haiku 4.5",
-    shortName: "Claude",
-    provider: "anthropic",
+    id: "mistralai/mistral-small-3.1-24b-instruct:free",
+    name: "Mistral Small 3.1",
+    shortName: "Mistral",
+    provider: "mistralai",
     color: modelColors[2],
     isActive: false,
+    pricing: { prompt: "0", completion: "0" },
   },
   {
-    id: "x-ai/grok-4.1-fast",
-    name: "Grok 4.1 Fast",
-    shortName: "Grok",
-    provider: "x-ai",
+    id: "google/gemma-3-27b-it:free",
+    name: "Gemma 3 27B",
+    shortName: "Gemma",
+    provider: "google",
     color: modelColors[3],
     isActive: false,
+    pricing: { prompt: "0", completion: "0" },
   },
 ];
