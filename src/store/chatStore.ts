@@ -18,6 +18,7 @@ export const useChatStore = create<ChatState>()(
       publicMode: null,
       apiKey: null,
       failedModels: {},
+      maxActiveModels: 8,
       temperature: "balanced" as TemperaturePreset,
       sessions: [],
       currentSessionId: null,
@@ -74,6 +75,11 @@ export const useChatStore = create<ChatState>()(
             (m) => m.id === modelId
           );
 
+          // Enforce max active models limit when activating
+          if (!isCurrentlyActive && state.activeModels.length >= state.maxActiveModels) {
+            return state;
+          }
+
           // Clear failure when re-activating a model
           const { [modelId]: _, ...cleanedFailed } = state.failedModels;
 
@@ -125,6 +131,8 @@ export const useChatStore = create<ChatState>()(
       },
 
       clearChat: () => set({ messages: [], typingModels: [], failedModels: {} }),
+
+      setMaxActiveModels: (limit) => set({ maxActiveModels: limit }),
 
       markModelFailed: (modelId, reason) =>
         set((state) => {

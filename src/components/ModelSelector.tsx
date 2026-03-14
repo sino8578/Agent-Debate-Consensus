@@ -15,6 +15,9 @@ export function ModelSelector() {
   const setModerator = useChatStore((state) => state.setModerator);
   const failedModels = useChatStore((state) => state.failedModels);
   const clearModelFailed = useChatStore((state) => state.clearModelFailed);
+  const maxActiveModels = useChatStore((state) => state.maxActiveModels);
+
+  const isAtLimit = activeModels.length >= maxActiveModels;
 
   return (
     <div>
@@ -22,6 +25,9 @@ export function ModelSelector() {
         <h3 className="text-[12px] font-medium text-muted uppercase tracking-[0.05em]">
           Agents
         </h3>
+        <span className={`text-[10px] font-medium ${isAtLimit ? "text-amber-400" : "text-muted/60"}`}>
+          {activeModels.length}/{maxActiveModels}
+        </span>
         <button
           onClick={() => setIsModalOpen(true)}
           className="w-6 h-6 flex items-center justify-center rounded-md text-muted hover:text-foreground hover:bg-elevated transition-colors duration-150 text-[16px] leading-none"
@@ -38,11 +44,13 @@ export function ModelSelector() {
           const isModerator = model.id === moderatorId;
           const isFailed = !!failedModels[model.id];
           const failReason = failedModels[model.id];
+          const isDisabledByLimit = !isActive && isAtLimit;
 
           return (
             <div key={model.id} className="group relative">
               <button
                 onClick={() => {
+                  if (isDisabledByLimit) return;
                   if (isFailed) {
                     clearModelFailed(model.id);
                   }
@@ -51,7 +59,7 @@ export function ModelSelector() {
                 className={`w-full flex items-center gap-2.5 px-2 py-[7px] rounded-lg text-left transition-all duration-150 ${
                   isActive
                     ? isFailed ? "bg-red-500/10" : "bg-elevated"
-                    : "hover:bg-elevated"
+                    : isDisabledByLimit ? "opacity-40 cursor-not-allowed" : "hover:bg-elevated"
                 }`}
               >
                 <div
@@ -141,6 +149,12 @@ export function ModelSelector() {
           );
         })}
       </div>
+
+      {isAtLimit && (
+        <div className="mt-2 px-2 text-[11px] text-amber-400/80 leading-snug">
+          Limit reached — deactivate an agent to add another
+        </div>
+      )}
 
       <ModelDiscoveryModal
         isOpen={isModalOpen}

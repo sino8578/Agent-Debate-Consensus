@@ -37,6 +37,7 @@ export function ChatContainer() {
   const apiKey = useChatStore((state) => state.apiKey);
   const setApiKey = useChatStore((state) => state.setApiKey);
 
+  const setMaxActiveModels = useChatStore((state) => state.setMaxActiveModels);
   const [configLoaded, setConfigLoaded] = useState(false);
 
   const isGenerating = typingModels.length > 0 || messages.some((m) => m.isStreaming);
@@ -47,6 +48,10 @@ export function ChatContainer() {
         const res = await fetch("/api/config");
         const data = await res.json();
         setPublicMode(data.publicMode);
+
+        if (data.maxActiveModels) {
+          setMaxActiveModels(data.maxActiveModels);
+        }
 
         if (data.publicMode) {
           const stored = sessionStorage.getItem("openrouter-api-key");
@@ -60,7 +65,7 @@ export function ChatContainer() {
       setConfigLoaded(true);
     }
     init();
-  }, [setPublicMode, setApiKey]);
+  }, [setPublicMode, setApiKey, setMaxActiveModels]);
 
   if (!configLoaded) {
     return (
