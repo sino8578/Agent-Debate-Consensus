@@ -65,6 +65,11 @@ export function MessageBubble({ message }: Props) {
 
   const avatarLetter = model?.shortName?.[0]?.toUpperCase() ?? "A";
 
+  // Don't render empty messages that finished streaming
+  if (!isUser && !message.content && !message.isStreaming) {
+    return null;
+  }
+
   if (isUser) {
     return (
       <div className="flex justify-end mb-3 animate-fade-in group/msg">

@@ -48,6 +48,11 @@ export const useChatStore = create<ChatState>()(
           ),
         })),
 
+      removeMessage: (id) =>
+        set((state) => ({
+          messages: state.messages.filter((m) => m.id !== id),
+        })),
+
       setTyping: (modelId, modelName, isTyping) =>
         set((state) => ({
           typingModels: isTyping

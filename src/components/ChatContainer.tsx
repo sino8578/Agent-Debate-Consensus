@@ -83,6 +83,7 @@ function ChatApp() {
   const addMessage = useChatStore((state) => state.addMessage);
   const updateMessage = useChatStore((state) => state.updateMessage);
   const completeMessage = useChatStore((state) => state.completeMessage);
+  const removeMessage = useChatStore((state) => state.removeMessage);
   const setTyping = useChatStore((state) => state.setTyping);
   const activeModels = useChatStore((state) => state.activeModels);
   const typingModels = useChatStore((state) => state.typingModels);
@@ -151,6 +152,13 @@ function ChatApp() {
           updateMessage(messageId, content, reasoning);
         },
         onComplete: () => {
+          // Remove empty messages (stream returned no content)
+          if (!content) {
+            removeMessage(messageId);
+            conversationEngine.completeResponse(modelId);
+            return;
+          }
+
           completeMessage(messageId);
           conversationEngine.completeResponse(modelId);
 
@@ -170,7 +178,7 @@ function ChatApp() {
         },
       });
     },
-    [addMessage, updateMessage, completeMessage, setTyping, contextWindowSize]
+    [addMessage, updateMessage, completeMessage, removeMessage, setTyping, contextWindowSize]
   );
 
   useEffect(() => {

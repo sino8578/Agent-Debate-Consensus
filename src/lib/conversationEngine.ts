@@ -6,16 +6,32 @@ interface ResponseDecision {
   priority: number;
 }
 
+const MAX_AI_ROUNDS = 3; // Max AI-to-AI exchanges before pausing for user
+
 export class ConversationEngine {
   private cooldowns: Map<string, number> = new Map();
   private responseQueue: Array<{ modelId: string; priority: number }> = [];
-  private pendingModels: Set<string> = new Set(); // Track models waiting to respond
+  private pendingModels: Set<string> = new Set();
   private maxConcurrent = 1;
   private currentlyResponding = 0;
   private onTriggerResponse?: (modelId: string) => void;
 
   setResponseHandler(handler: (modelId: string) => void) {
     this.onTriggerResponse = handler;
+  }
+
+  /**
+   * Count consecutive AI messages since the last user message.
+   */
+  private countAiRoundsSinceUser(messages: Message[]): number {
+    let count = 0;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === "user") break;
+      if (messages[i].role === "assistant" && !messages[i].isStreaming) {
+        count++;
+      }
+    }
+    return count;
   }
 
   analyzeForResponse(
@@ -32,7 +48,7 @@ export class ConversationEngine {
     let priority = 0;
     let shouldRespond = false;
 
-    // Highest priority: @mentioned - BYPASSES COOLDOWN
+    // Highest priority: @mentioned - BYPASSES COOLDOWN and round limit
     const mentionPattern = new RegExp(`@${model.shortName.toLowerCase()}\\b`, "i");
     const isMentioned = mentionPattern.test(latestMessage.content);
 
@@ -49,20 +65,27 @@ export class ConversationEngine {
       return { shouldRespond: false, delay: 0, priority: 0 };
     }
 
-    // High priority: User message
+    // Check round limit — don't auto-respond if too many AI rounds without user
+    // @mentions and user messages bypass this
+    const aiRounds = this.countAiRoundsSinceUser(messages);
+    if (!isMentioned && latestMessage.role !== "user" && aiRounds >= MAX_AI_ROUNDS) {
+      return { shouldRespond: false, delay: 0, priority: 0 };
+    }
+
+    // High priority: User message — all active models respond
     if (!shouldRespond && latestMessage.role === "user") {
       shouldRespond = true;
       priority = 80;
     }
 
-    // Medium priority: Question asked (and not already responding to mention)
+    // Medium priority: Another AI asked a question
     if (!shouldRespond && latestMessage.content.includes("?")) {
       shouldRespond = true;
       priority = 60;
     }
 
-    // Low priority: Random chance (15%)
-    if (!shouldRespond && Math.random() < 0.15) {
+    // Low priority: Random chance (10%) for natural flow
+    if (!shouldRespond && Math.random() < 0.10) {
       shouldRespond = true;
       priority = 20;
     }
@@ -153,10 +176,11 @@ Rules:
 - When you disagree with others, explain why respectfully and specifically
 - Build on good arguments made by others — acknowledge strong points
 - Work toward finding consensus where possible, but never agree superficially
-- The human user is the moderator — incorporate their input and respect their direction
+- The human user is the moderator — they guide the discussion and can intervene at any time. Follow their direction.
 - You can address others using @mentions (e.g., @${otherModels[0] || "User"})
 - If directly addressed with @${model.shortName}, you must respond
-- Keep responses focused and substantive (2-4 sentences usually, unless more detail is warranted)`;
+- Keep responses focused and substantive (2-4 sentences usually, unless more detail is warranted)
+- If consensus has been reached or you have nothing new to add, say so briefly rather than repeating points`;
 }
 
 export function buildContextWindow(

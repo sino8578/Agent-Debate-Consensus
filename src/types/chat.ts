@@ -45,6 +45,7 @@ export interface ChatState {
   addMessage: (message: Omit<Message, "id" | "timestamp">) => string;
   updateMessage: (id: string, content: string, reasoning?: string) => void;
   completeMessage: (id: string) => void;
+  removeMessage: (id: string) => void;
   setTyping: (modelId: string, modelName: string, isTyping: boolean) => void;
   toggleModel: (modelId: string) => void;
   addAvailableModel: (model: Model) => void;
