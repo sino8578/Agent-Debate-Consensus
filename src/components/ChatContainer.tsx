@@ -298,6 +298,21 @@ function ChatApp() {
           <ActiveModels />
         </div>
 
+        {/* Moderator indicator */}
+        <div className="px-3 pb-2">
+          <div className="px-2 flex items-center gap-2">
+            <span className="text-[11px] text-muted uppercase tracking-[0.04em]">Moderator:</span>
+            {moderatorId ? (
+              <span className="text-[12px] font-medium text-amber-400 flex items-center gap-1">
+                <span className="text-[9px]">&#9733;</span>
+                {activeModels.find((m) => m.id === moderatorId)?.shortName ?? "—"}
+              </span>
+            ) : (
+              <span className="text-[12px] font-medium text-primary">You</span>
+            )}
+          </div>
+        </div>
+
         {/* Agents list */}
         <div className="flex-1 overflow-y-auto px-3 pt-1">
           <ModelSelector />

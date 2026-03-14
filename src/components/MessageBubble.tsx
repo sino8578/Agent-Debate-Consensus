@@ -1,11 +1,76 @@
 "use client";
 
-import { Message } from "@/types/chat";
+import React from "react";
+import { Message, Model } from "@/types/chat";
 import { useChatStore } from "@/store/chatStore";
 import { messageToMarkdown } from "@/lib/exportChat";
 import { useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+
+/**
+ * Process React children and replace @mentions with colored spans.
+ * Matches @shortName against known models and colors them accordingly.
+ */
+function highlightMentions(
+  children: React.ReactNode,
+  models: Model[],
+  inUserBubble = false
+): React.ReactNode {
+  return React.Children.map(children, (child) => {
+    if (typeof child !== "string") return child;
+
+    const mentionRegex = /@(\w[\w.-]*)/g;
+    const parts: React.ReactNode[] = [];
+    let lastIndex = 0;
+    let match;
+
+    while ((match = mentionRegex.exec(child)) !== null) {
+      if (match.index > lastIndex) {
+        parts.push(child.slice(lastIndex, match.index));
+      }
+
+      const mentionName = match[1];
+      const mentionedModel = models.find(
+        (m) => m.shortName.toLowerCase() === mentionName.toLowerCase()
+      );
+
+      if (mentionedModel) {
+        parts.push(
+          <span
+            key={match.index}
+            className="font-semibold"
+            style={{ color: inUserBubble ? "white" : mentionedModel.color }}
+          >
+            {inUserBubble && (
+              <span
+                className="inline-block w-1.5 h-1.5 rounded-full mr-0.5 align-middle"
+                style={{ backgroundColor: mentionedModel.color }}
+              />
+            )}
+            @{mentionedModel.shortName}
+          </span>
+        );
+      } else if (mentionName.toLowerCase() === "user") {
+        parts.push(
+          <span key={match.index} className="font-semibold underline underline-offset-2">
+            @User
+          </span>
+        );
+      } else {
+        parts.push(match[0]);
+      }
+
+      lastIndex = match.index + match[0].length;
+    }
+
+    if (lastIndex < child.length) {
+      parts.push(child.slice(lastIndex));
+    }
+
+    return parts.length > 0 ? <>{parts}</> : child;
+  });
+}
 
 const COLLAPSE_THRESHOLD = 300; // pixels
 
@@ -23,8 +88,11 @@ export function MessageBubble({ message }: Props) {
   const [expanded, setExpanded] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
   const isUser = message.role === "user";
-  const model = [...activeModels, ...availableModels].find(
-    (m) => m.id === message.modelId
+  const allModels = [...activeModels, ...availableModels];
+  const model = allModels.find((m) => m.id === message.modelId);
+  // Deduplicate models for mention highlighting
+  const uniqueModels = allModels.filter(
+    (m, i, arr) => arr.findIndex((a) => a.id === m.id) === i
   );
 
   const handleCopy = async () => {
@@ -69,7 +137,7 @@ export function MessageBubble({ message }: Props) {
           </div>
           <div className="bg-primary text-white rounded-[20px] rounded-br-md px-4 py-2.5">
             <div className="whitespace-pre-wrap leading-[1.6]" style={{ fontSize: `${fontSize}px` }}>
-              {message.content}
+              {highlightMentions(message.content, uniqueModels, true)}
             </div>
           </div>
         </div>
@@ -160,18 +228,18 @@ export function MessageBubble({ message }: Props) {
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
                 components={{
-                  p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                  strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
-                  em: ({ children }) => <em className="italic">{children}</em>,
-                  h1: ({ children }) => <h1 className="text-[1.3em] font-bold mb-2 mt-3 first:mt-0">{children}</h1>,
-                  h2: ({ children }) => <h2 className="text-[1.15em] font-bold mb-1.5 mt-2.5 first:mt-0">{children}</h2>,
-                  h3: ({ children }) => <h3 className="text-[1.05em] font-semibold mb-1 mt-2 first:mt-0">{children}</h3>,
+                  p: ({ children }) => <p className="mb-2 last:mb-0">{highlightMentions(children, uniqueModels)}</p>,
+                  strong: ({ children }) => <strong className="font-semibold">{highlightMentions(children, uniqueModels)}</strong>,
+                  em: ({ children }) => <em className="italic">{highlightMentions(children, uniqueModels)}</em>,
+                  h1: ({ children }) => <h1 className="text-[1.3em] font-bold mb-2 mt-3 first:mt-0">{highlightMentions(children, uniqueModels)}</h1>,
+                  h2: ({ children }) => <h2 className="text-[1.15em] font-bold mb-1.5 mt-2.5 first:mt-0">{highlightMentions(children, uniqueModels)}</h2>,
+                  h3: ({ children }) => <h3 className="text-[1.05em] font-semibold mb-1 mt-2 first:mt-0">{highlightMentions(children, uniqueModels)}</h3>,
                   ul: ({ children }) => <ul className="list-disc pl-5 mb-2 space-y-0.5">{children}</ul>,
                   ol: ({ children }) => <ol className="list-decimal pl-5 mb-2 space-y-0.5">{children}</ol>,
-                  li: ({ children }) => <li className="leading-[1.5]">{children}</li>,
+                  li: ({ children }) => <li className="leading-[1.5]">{highlightMentions(children, uniqueModels)}</li>,
                   blockquote: ({ children }) => (
                     <blockquote className="border-l-2 border-primary/40 pl-3 my-2 text-foreground/70 italic">
-                      {children}
+                      {highlightMentions(children, uniqueModels)}
                     </blockquote>
                   ),
                   code: ({ className, children }) => {
@@ -201,8 +269,8 @@ export function MessageBubble({ message }: Props) {
                       <table className="min-w-full text-[0.9em]">{children}</table>
                     </div>
                   ),
-                  th: ({ children }) => <th className="border border-separator px-2 py-1 font-semibold text-left bg-elevated">{children}</th>,
-                  td: ({ children }) => <td className="border border-separator px-2 py-1">{children}</td>,
+                  th: ({ children }) => <th className="border border-separator px-2 py-1 font-semibold text-left bg-elevated">{highlightMentions(children, uniqueModels)}</th>,
+                  td: ({ children }) => <td className="border border-separator px-2 py-1">{highlightMentions(children, uniqueModels)}</td>,
                 }}
               >
                 {message.content}

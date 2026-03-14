@@ -103,7 +103,7 @@ export function ModelSelector() {
                       ? "text-amber-400 opacity-100"
                       : "text-muted hover:text-amber-400 opacity-0 group-hover:opacity-100"
                   }`}
-                  title={isModerator ? "Remove as moderator" : "Set as moderator"}
+                  title={isModerator ? "Remove as debate moderator (you will moderate)" : "Set as debate moderator"}
                 >
                   &#9733;
                 </button>
