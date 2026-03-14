@@ -22,49 +22,63 @@ const TEMP_MAP: Record<TemperaturePreset, number> = {
 };
 
 export function ChatContainer() {
-  const addMessage = useChatStore((state) => state.addMessage);
-  const updateMessage = useChatStore((state) => state.updateMessage);
-  const completeMessage = useChatStore((state) => state.completeMessage);
-  const setTyping = useChatStore((state) => state.setTyping);
-  const activeModels = useChatStore((state) => state.activeModels);
-  const typingModels = useChatStore((state) => state.typingModels);
-  const messages = useChatStore((state) => state.messages);
-  const theme = useChatStore((state) => state.theme);
-  const setTheme = useChatStore((state) => state.setTheme);
-  const publicMode = useChatStore((state) => state.publicMode);
-  const setPublicMode = useChatStore((state) => state.setPublicMode);
+  const setAppMode = useChatStore((state) => state.setAppMode);
+  const setHasServerKey = useChatStore((state) => state.setHasServerKey);
+  const setFreeModelIds = useChatStore((state) => state.setFreeModelIds);
+  const hasServerKey = useChatStore((state) => state.hasServerKey);
   const apiKey = useChatStore((state) => state.apiKey);
   const setApiKey = useChatStore((state) => state.setApiKey);
-
   const setMaxActiveModels = useChatStore((state) => state.setMaxActiveModels);
-  const [configLoaded, setConfigLoaded] = useState(false);
+  const freeModelsLoadedAt = useChatStore((state) => state.freeModelsLoadedAt);
 
-  const isGenerating = typingModels.length > 0 || messages.some((m) => m.isStreaming);
+  const [configLoaded, setConfigLoaded] = useState(false);
 
   useEffect(() => {
     async function init() {
       try {
         const res = await fetch("/api/config");
         const data = await res.json();
-        setPublicMode(data.publicMode);
+        setAppMode(data.appMode);
+        setHasServerKey(data.hasServerKey);
 
         if (data.maxActiveModels) {
           setMaxActiveModels(data.maxActiveModels);
         }
 
-        if (data.publicMode) {
+        // Restore user key from session if applicable
+        if (!data.hasServerKey || data.appMode === "public") {
           const stored = sessionStorage.getItem("openrouter-api-key");
           if (stored) {
             setApiKey(stored);
           }
         }
+
+        // In public mode with server key, fetch free model list
+        if (data.hasServerKey && data.appMode === "public") {
+          const state = useChatStore.getState();
+          const isCacheFresh =
+            state.freeModelsLoadedAt &&
+            Date.now() - state.freeModelsLoadedAt < 3600_000;
+          if (!isCacheFresh) {
+            try {
+              const freeRes = await fetch("/api/free-models");
+              const freeData = await freeRes.json();
+              if (freeData.freeModelIds) {
+                setFreeModelIds(freeData.freeModelIds);
+              }
+            } catch (err) {
+              console.error("Failed to fetch free models:", err);
+            }
+          }
+        }
       } catch {
-        setPublicMode(false);
+        setAppMode("private");
+        setHasServerKey(false);
       }
       setConfigLoaded(true);
     }
     init();
-  }, [setPublicMode, setApiKey, setMaxActiveModels]);
+  }, [setAppMode, setHasServerKey, setFreeModelIds, setApiKey, setMaxActiveModels, freeModelsLoadedAt]);
 
   if (!configLoaded) {
     return (
@@ -74,7 +88,9 @@ export function ChatContainer() {
     );
   }
 
-  if (publicMode && !apiKey) {
+  // Show WelcomeScreen only when there is no server key AND no user key
+  const noKeyAvailable = !hasServerKey && !apiKey;
+  if (noKeyAvailable) {
     return <WelcomeScreen />;
   }
 
@@ -93,7 +109,9 @@ function ChatApp() {
   const messages = useChatStore((state) => state.messages);
   const theme = useChatStore((state) => state.theme);
   const setTheme = useChatStore((state) => state.setTheme);
-  const publicMode = useChatStore((state) => state.publicMode);
+  const appMode = useChatStore((state) => state.appMode);
+  const hasServerKey = useChatStore((state) => state.hasServerKey);
+  const apiKey = useChatStore((state) => state.apiKey);
   const clearApiKey = useChatStore((state) => state.clearApiKey);
   const fontSize = useChatStore((state) => state.fontSize);
   const setFontSize = useChatStore((state) => state.setFontSize);
@@ -474,7 +492,7 @@ function ChatApp() {
           </div>
 
           <div className="flex items-center justify-between mt-1.5">
-            {publicMode && (
+            {apiKey && (
               <button
                 onClick={clearApiKey}
                 className="flex items-center gap-1 h-[26px] text-[11px] text-muted/60 hover:text-red-400 rounded-md hover:bg-elevated transition-colors duration-150 px-1.5"
@@ -490,7 +508,7 @@ function ChatApp() {
               href="https://github.com/Lexus2016/Agent-Debate-Consensus"
               target="_blank"
               rel="noopener noreferrer"
-              className={`flex items-center gap-1 h-[26px] text-[11px] text-muted/60 hover:text-foreground rounded-md hover:bg-elevated transition-colors duration-150 px-1.5 ${publicMode ? "" : "ml-auto"}`}
+              className={`flex items-center gap-1 h-[26px] text-[11px] text-muted/60 hover:text-foreground rounded-md hover:bg-elevated transition-colors duration-150 px-1.5 ${apiKey ? "" : "ml-auto"}`}
               title="View source on GitHub"
             >
               <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">

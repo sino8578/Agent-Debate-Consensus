@@ -40,6 +40,8 @@ export interface TypingState {
 
 export type Theme = "light" | "dark";
 
+export type AppMode = "private" | "public";
+
 export type TemperaturePreset = "creative" | "balanced" | "precise";
 
 export interface DebateSession {
@@ -62,7 +64,10 @@ export interface ChatState {
   theme: Theme;
   fontSize: number;
   moderatorId: string | null;
-  publicMode: boolean | null;
+  appMode: AppMode | null;
+  hasServerKey: boolean;
+  freeModelIds: string[];
+  freeModelsLoadedAt: number | null;
   apiKey: string | null;
   failedModels: Record<string, string>; // modelId -> error reason
   maxActiveModels: number;
@@ -79,7 +84,9 @@ export interface ChatState {
   setTheme: (theme: Theme) => void;
   setFontSize: (size: number) => void;
   setModerator: (modelId: string | null) => void;
-  setPublicMode: (mode: boolean) => void;
+  setAppMode: (mode: AppMode) => void;
+  setHasServerKey: (has: boolean) => void;
+  setFreeModelIds: (ids: string[]) => void;
   setApiKey: (key: string) => void;
   clearApiKey: () => void;
   clearChat: () => void;

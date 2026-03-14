@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useChatStore } from "@/store/chatStore";
 import { Model, FileAttachment } from "@/types/chat";
+import { ApiKeyPromptModal } from "./ApiKeyPromptModal";
 
 const MAX_FILE_SIZE = 100 * 1024; // 100 KB
 const ALLOWED_EXTENSIONS = [
@@ -38,8 +39,15 @@ export function ChatInput({ onSend, onStop, disabled, isGenerating }: Props) {
   const [pendingFile, setPendingFile] = useState<FileAttachment | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [keyPromptOpen, setKeyPromptOpen] = useState(false);
 
   const { activeModels, availableModels, webSearchEnabled, setWebSearch } = useChatStore();
+  const appMode = useChatStore((state) => state.appMode);
+  const hasServerKey = useChatStore((state) => state.hasServerKey);
+  const apiKey = useChatStore((state) => state.apiKey);
+  const isPublicMode = appMode === "public" && hasServerKey;
+  const userHasKey = !!apiKey;
+  const webSearchBlocked = isPublicMode && !userHasKey;
 
   const allModels: Model[] = [
     ...activeModels,
@@ -302,7 +310,13 @@ export function ChatInput({ onSend, onStop, disabled, isGenerating }: Props) {
 
             <div className="relative group">
               <button
-                onClick={() => setWebSearch(!webSearchEnabled)}
+                onClick={() => {
+                  if (webSearchBlocked) {
+                    setKeyPromptOpen(true);
+                    return;
+                  }
+                  setWebSearch(!webSearchEnabled);
+                }}
                 className={`w-[30px] h-[30px] flex items-center justify-center rounded-full transition-all duration-200 ${
                   webSearchEnabled
                     ? "bg-primary/15 text-primary ring-1 ring-primary/30"
@@ -319,7 +333,12 @@ export function ChatInput({ onSend, onStop, disabled, isGenerating }: Props) {
                 </svg>
               </button>
               <div className="absolute bottom-full right-0 mb-2 px-2.5 py-1.5 rounded-lg bg-surface-light border border-separator shadow-lg text-[12px] leading-[1.4] text-foreground whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity duration-150">
-                {webSearchEnabled ? (
+                {webSearchBlocked ? (
+                  <>
+                    <span className="font-medium">Web search</span>
+                    <span className="text-muted"> — requires API key</span>
+                  </>
+                ) : webSearchEnabled ? (
                   <>
                     <span className="text-primary font-medium">Web search ON</span>
                     <span className="text-muted"> — models use live internet data</span>
@@ -363,6 +382,12 @@ export function ChatInput({ onSend, onStop, disabled, isGenerating }: Props) {
           Agents debating — you can intervene at any time
         </p>
       )}
+
+      <ApiKeyPromptModal
+        isOpen={keyPromptOpen}
+        onClose={() => setKeyPromptOpen(false)}
+        reason="web-search"
+      />
     </div>
   );
 }

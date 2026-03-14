@@ -3,10 +3,14 @@
 import { useState } from "react";
 import { useChatStore } from "@/store/chatStore";
 import { ModelDiscoveryModal } from "./ModelDiscoveryModal";
+import { ApiKeyPromptModal } from "./ApiKeyPromptModal";
 import { availableModels as defaultModels } from "@/lib/models";
 
 export function ModelSelector() {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [keyPromptOpen, setKeyPromptOpen] = useState(false);
+  const [keyPromptModel, setKeyPromptModel] = useState<string | undefined>();
+
   const availableModels = useChatStore((state) => state.availableModels);
   const activeModels = useChatStore((state) => state.activeModels);
   const toggleModel = useChatStore((state) => state.toggleModel);
@@ -16,6 +20,13 @@ export function ModelSelector() {
   const failedModels = useChatStore((state) => state.failedModels);
   const clearModelFailed = useChatStore((state) => state.clearModelFailed);
   const maxActiveModels = useChatStore((state) => state.maxActiveModels);
+  const appMode = useChatStore((state) => state.appMode);
+  const hasServerKey = useChatStore((state) => state.hasServerKey);
+  const apiKey = useChatStore((state) => state.apiKey);
+  const freeModelIds = useChatStore((state) => state.freeModelIds);
+
+  const isPublicMode = appMode === "public" && hasServerKey;
+  const userHasKey = !!apiKey;
 
   const isAtLimit = activeModels.length >= maxActiveModels;
 
@@ -25,6 +36,22 @@ export function ModelSelector() {
     const bActive = activeIds.has(b.id) ? 0 : 1;
     return aActive - bActive;
   });
+
+  const isModelFree = (modelId: string) => {
+    // If we have the free model list, use it as source of truth
+    if (freeModelIds.length > 0) {
+      return freeModelIds.includes(modelId);
+    }
+    // Fallback to pricing field if available
+    const model = availableModels.find((m) => m.id === modelId);
+    if (model?.pricing) {
+      return (
+        parseFloat(model.pricing.prompt) === 0 &&
+        parseFloat(model.pricing.completion) === 0
+      );
+    }
+    return false;
+  };
 
   return (
     <div>
@@ -54,12 +81,20 @@ export function ModelSelector() {
           const isFailed = !!failedModels[model.id];
           const failReason = failedModels[model.id];
           const isDisabledByLimit = !isActive && isAtLimit;
+          const isFree = isModelFree(model.id);
+          const isPaidBlocked = isPublicMode && !userHasKey && !isFree;
 
           return (
             <div key={model.id} className="group relative">
               <button
                 onClick={() => {
                   if (isDisabledByLimit) return;
+                  // In public mode without user key, block paid models
+                  if (isPaidBlocked && !isActive) {
+                    setKeyPromptModel(model.name);
+                    setKeyPromptOpen(true);
+                    return;
+                  }
                   if (isFailed) {
                     clearModelFailed(model.id);
                   }
@@ -68,7 +103,7 @@ export function ModelSelector() {
                 className={`w-full flex items-center gap-2.5 px-2 py-[7px] rounded-lg text-left transition-all duration-150 ${
                   isActive
                     ? isFailed ? "bg-red-500/10" : "bg-elevated"
-                    : isDisabledByLimit ? "opacity-40 cursor-not-allowed" : "hover:bg-elevated"
+                    : isDisabledByLimit || isPaidBlocked ? "opacity-40 cursor-not-allowed" : "hover:bg-elevated"
                 }`}
               >
                 <div
@@ -82,7 +117,19 @@ export function ModelSelector() {
                     isFailed ? "text-red-400/80" : "text-foreground/90"
                   }`}>
                     <span className="truncate">{model.name}</span>
-                    {model.pricing && parseFloat(model.pricing.prompt) === 0 && parseFloat(model.pricing.completion) === 0 && (
+                    {isPublicMode && !userHasKey && (
+                      isFree ? (
+                        <span className="text-[9px] px-1 py-[0.5px] rounded bg-green-500/15 text-green-400 font-semibold uppercase tracking-wide flex-shrink-0">
+                          free
+                        </span>
+                      ) : (
+                        <span className="text-[9px] px-1 py-[0.5px] rounded bg-amber-500/15 text-amber-400 font-semibold uppercase tracking-wide flex-shrink-0">
+                          paid
+                        </span>
+                      )
+                    )}
+                    {/* Show free badge in non-public mode based on pricing */}
+                    {(!isPublicMode || userHasKey) && model.pricing && parseFloat(model.pricing.prompt) === 0 && parseFloat(model.pricing.completion) === 0 && (
                       <span className="text-[9px] px-1 py-[0.5px] rounded bg-green-500/15 text-green-400 font-semibold uppercase tracking-wide flex-shrink-0">
                         free
                       </span>
@@ -102,6 +149,11 @@ export function ModelSelector() {
                       )}
                     </div>
                   </div>
+                )}
+                {isPaidBlocked && !isActive && (
+                  <svg className="w-3.5 h-3.5 text-muted/40 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                  </svg>
                 )}
                 {isModerator && !isFailed && (
                   <span className="text-[10px] text-amber-400 flex-shrink-0" title="Moderator">
@@ -176,6 +228,12 @@ export function ModelSelector() {
       <ModelDiscoveryModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
+      />
+      <ApiKeyPromptModal
+        isOpen={keyPromptOpen}
+        onClose={() => setKeyPromptOpen(false)}
+        reason="paid-model"
+        modelName={keyPromptModel}
       />
     </div>
   );

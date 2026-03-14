@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { v4 as uuidv4 } from "uuid";
-import { ChatState, Model, Message, Theme, TemperaturePreset, DebateSession } from "@/types/chat";
+import { ChatState, Model, Message, Theme, AppMode, TemperaturePreset, DebateSession } from "@/types/chat";
 import { availableModels as defaultModels } from "@/lib/models";
 
 export const useChatStore = create<ChatState>()(
@@ -15,7 +15,10 @@ export const useChatStore = create<ChatState>()(
       theme: "dark" as Theme,
       fontSize: 15,
       moderatorId: null,
-      publicMode: null,
+      appMode: null as AppMode | null,
+      hasServerKey: false,
+      freeModelIds: [] as string[],
+      freeModelsLoadedAt: null as number | null,
       apiKey: null,
       failedModels: {},
       maxActiveModels: 8,
@@ -147,7 +150,9 @@ export const useChatStore = create<ChatState>()(
           };
         }),
 
-      setPublicMode: (mode) => set({ publicMode: mode }),
+      setAppMode: (mode) => set({ appMode: mode }),
+      setHasServerKey: (has) => set({ hasServerKey: has }),
+      setFreeModelIds: (ids) => set({ freeModelIds: ids, freeModelsLoadedAt: Date.now() }),
 
       setApiKey: (key) => {
         sessionStorage.setItem("openrouter-api-key", key);
