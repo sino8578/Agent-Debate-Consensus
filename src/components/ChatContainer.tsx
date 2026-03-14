@@ -5,7 +5,9 @@ import { useChatStore } from "@/store/chatStore";
 import {
   conversationEngine,
   buildSystemPrompt,
+  buildSummaryPrompt,
   buildContextWindow,
+  MAX_MODERATOR_ROUNDS,
 } from "@/lib/conversationEngine";
 import { streamModelResponse, stopAllStreams } from "@/lib/streamHandler";
 import { messagesToMarkdown, downloadMarkdown } from "@/lib/exportChat";
@@ -143,6 +145,19 @@ function ChatApp() {
     });
   }, [setTyping, completeMessage]);
 
+  // Check if discussion settled (no pending work) and trigger moderator/summarizer.
+  // Used after empty responses or failed retries to keep the debate flowing.
+  const checkSettled = useCallback(() => {
+    if (conversationEngine.hasPendingWork || conversationEngine.roundComplete) return;
+    const latestState = useChatStore.getState();
+    const lastAssistantMsg = [...latestState.messages]
+      .reverse()
+      .find((m) => m.role === "assistant" && !m.isStreaming);
+    if (lastAssistantMsg) {
+      processModelResponses(lastAssistantMsg);
+    }
+  }, []);
+
   const triggerModelResponse = useCallback(
     async (modelId: string) => {
       const state = useChatStore.getState();
@@ -157,10 +172,11 @@ function ChatApp() {
         return;
       }
 
-      setTyping(modelId, model.name, true);
-
       const isModerator = model.id === state.moderatorId;
-      const systemPrompt = buildSystemPrompt(model, state.activeModels, isModerator);
+      const isSummarizer = model.id === conversationEngine.summarizerModelId;
+      const systemPrompt = isSummarizer
+        ? buildSummaryPrompt(model, state.activeModels)
+        : buildSystemPrompt(model, state.activeModels, isModerator);
       const contextMessages = buildContextWindow(
         state.messages,
         contextWindowSize,
@@ -172,62 +188,119 @@ function ChatApp() {
         ...contextMessages,
       ];
 
-      const messageId = addMessage({
-        role: "assistant",
-        content: "",
-        modelId: model.id,
-        modelName: model.name,
-        isStreaming: true,
-      });
+      const streamOptions = { temperature: TEMP_MAP[state.temperature], webSearch: state.webSearchEnabled };
+      const RETRY_DELAYS = [5000, 15000, 30000];
 
-      setTyping(modelId, model.name, false);
+      for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
+        // Wait before retry (skip for first attempt)
+        if (attempt > 0) {
+          addMessage({
+            role: "system",
+            content: `${model.name}: error, retrying (${attempt}/${RETRY_DELAYS.length})...`,
+          });
 
-      let content = "";
-      let reasoning = "";
-      await streamModelResponse(modelId, apiMessages, {
-        onToken: (token, reasoningToken) => {
-          if (token) content += token;
-          if (reasoningToken) reasoning += reasoningToken;
-          updateMessage(messageId, content, reasoning);
-        },
-        onComplete: () => {
-          if (!content) {
-            removeMessage(messageId);
+          await new Promise<void>((r) => setTimeout(r, RETRY_DELAYS[attempt - 1]));
+
+          // Bail if round was cancelled during wait
+          if (conversationEngine.roundComplete) {
             conversationEngine.completeResponse(modelId);
             return;
           }
+        }
 
-          completeMessage(messageId);
+        const messageId = addMessage({
+          role: "assistant",
+          content: "",
+          modelId: model.id,
+          modelName: model.name,
+          isStreaming: true,
+        });
 
-          // If the completing model is the moderator, mark round complete
-          // BEFORE completeResponse to prevent the queue from triggering more models
-          const latestState = useChatStore.getState();
-          const isModerator = modelId === latestState.moderatorId;
-          if (isModerator) {
-            conversationEngine.markRoundComplete();
+        // Attempt streaming — wrap callbacks in a promise for retry control
+        const result = await new Promise<{ content: string; reasoning: string; error?: Error }>((resolve) => {
+          let content = "";
+          let reasoning = "";
+          streamModelResponse(modelId, apiMessages, {
+            onToken: (token, reasoningToken) => {
+              if (token) content += token;
+              if (reasoningToken) reasoning += reasoningToken;
+              updateMessage(messageId, content, reasoning);
+            },
+            onComplete: () => resolve({ content, reasoning }),
+            onError: (error) => resolve({ content: "", reasoning: "", error }),
+          }, streamOptions);
+        });
+
+        // ── Error: retry or give up ──
+        if (result.error) {
+          removeMessage(messageId);
+
+          if (attempt < RETRY_DELAYS.length) {
+            continue; // Will retry after delay
           }
 
+          // All retries exhausted
+          console.error(`${model.name} failed after ${RETRY_DELAYS.length} retries:`, result.error);
+          addMessage({
+            role: "system",
+            content: `${model.name}: failed after ${RETRY_DELAYS.length} retries — ${result.error.message}`,
+          });
           conversationEngine.completeResponse(modelId);
-          clearModelFailed(modelId);
+          markModelFailed(modelId, result.error.message);
+          // Check if discussion settled — triggers new moderator if old one was reassigned
+          checkSettled();
+          return;
+        }
 
-          if (isModerator) {
-            return;
-          }
+        // ── Empty response ──
+        if (!result.content) {
+          removeMessage(messageId);
+          const isDiscussion = conversationEngine.hasResponded(modelId);
+          conversationEngine.completeResponse(modelId, isDiscussion);
+          // Check if discussion settled and moderator/summarizer should be triggered
+          checkSettled();
+          return;
+        }
 
-          const latestMessage = latestState.messages.find(
-            (m) => m.id === messageId
-          );
+        // ── Success ──
+        completeMessage(messageId);
+
+        const latestState = useChatStore.getState();
+        const isMod = modelId === latestState.moderatorId;
+        const isSum = modelId === conversationEngine.summarizerModelId;
+
+        const isDiscussion = conversationEngine.hasResponded(modelId);
+        conversationEngine.completeResponse(modelId, isDiscussion);
+        clearModelFailed(modelId);
+
+        // Summarizer (random model when no moderator) → round over
+        if (isSum) {
+          conversationEngine.markRoundComplete();
+          return;
+        }
+
+        const latestMessage = latestState.messages.find(
+          (m) => m.id === messageId
+        );
+
+        if (isMod) {
+          // Moderator spoke — check if it @mentioned anyone for further discussion
           if (latestMessage) {
             processModelResponses(latestMessage);
           }
-        },
-        onError: (error) => {
-          console.error("Stream error:", error);
-          removeMessage(messageId);
-          conversationEngine.completeResponse(modelId);
-          markModelFailed(modelId, error.message);
-        },
-      }, { temperature: TEMP_MAP[state.temperature], webSearch: state.webSearchEnabled });
+          // If no models were queued → moderator concluded, round over
+          if (!conversationEngine.hasPendingWork) {
+            conversationEngine.markRoundComplete();
+          }
+          return;
+        }
+
+        // Non-moderator: process responses (scan for @mentions, trigger discussion)
+        if (latestMessage) {
+          processModelResponses(latestMessage);
+        }
+        return; // Success — exit retry loop
+      }
     },
     [addMessage, updateMessage, completeMessage, removeMessage, setTyping, contextWindowSize, markModelFailed, clearModelFailed]
   );
@@ -262,10 +335,36 @@ function ChatApp() {
         }
       }
 
-      // Only mark round complete when no model wants to respond AND
-      // no models are still queued/responding from the original user message
+      // When no more models want to respond and no pending work:
+      // → Trigger moderator (or random summarizer) if not yet spoken
       if (!anyQueued && latestMessage.role === "assistant" && !conversationEngine.hasPendingWork) {
-        conversationEngine.markRoundComplete();
+        // Don't re-trigger moderator from its own completion — that's handled in onComplete
+        if (latestMessage.modelId === state.moderatorId) {
+          return;
+        }
+
+        if (state.moderatorId && !failedModelIds.has(state.moderatorId)) {
+          if (conversationEngine.moderatorSettleCount < MAX_MODERATOR_ROUNDS) {
+            // Moderator hasn't hit max settle-triggered interventions — trigger for summary/moderation
+            conversationEngine.incrementModeratorSettle();
+            conversationEngine.queueResponse(state.moderatorId, 2000, 50);
+          } else {
+            // Moderator exhausted its interventions — force round complete
+            conversationEngine.markRoundComplete();
+          }
+        } else {
+          // No AI moderator — pick random active model to give a brief summary
+          const candidates = state.activeModels.filter(
+            (m) => !failedModelIds.has(m.id) && conversationEngine.hasResponded(m.id)
+          );
+          if (candidates.length > 0 && !conversationEngine.summarizerModelId) {
+            const summarizer = candidates[Math.floor(Math.random() * candidates.length)];
+            conversationEngine.summarizerModelId = summarizer.id;
+            conversationEngine.queueResponse(summarizer.id, 2000, 50);
+          } else {
+            conversationEngine.markRoundComplete();
+          }
+        }
       }
     },
     []
@@ -464,7 +563,11 @@ function ChatApp() {
             {messages.length > 0 && (
               <button
                 onClick={() => {
-                  const md = messagesToMarkdown(messages);
+                  const state = useChatStore.getState();
+                  const md = messagesToMarkdown(messages, {
+                    activeModels: state.activeModels,
+                    moderatorId: state.moderatorId,
+                  });
                   const date = new Date().toISOString().split("T")[0];
                   downloadMarkdown(md, `debate-${date}.md`);
                 }}

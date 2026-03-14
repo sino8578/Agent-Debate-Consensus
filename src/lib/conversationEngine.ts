@@ -6,8 +6,14 @@ interface ResponseDecision {
   priority: number;
 }
 
-const MAX_PER_MODEL = 2; // Max responses per model between user messages
-const MAX_MODERATOR_ROUNDS = 1; // Moderator speaks once per user message (final word)
+// ── Round structure ──
+// Phase 1 (Opening, priority 80): All non-moderator models respond once to user's question.
+// Phase 2 (Discussion, priority 70): AI @mentions trigger responses within budget limits.
+//   Discussion can go multiple rounds (A→B→A→B) but is bounded by per-model and total caps.
+// Phase 3 (Summary): Moderator is triggered dynamically when discussion settles, summarizes all.
+const MAX_DISCUSSION_PER_MODEL = 5; // Each model can give up to 5 discussion responses per round
+const MAX_TOTAL_DISCUSSION = 8; // Total discussion messages across ALL models per round
+export const MAX_MODERATOR_ROUNDS = 3; // AI moderator can intervene up to 3 times (cycle: discussion → summary)
 
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -17,7 +23,10 @@ export class ConversationEngine {
   private cooldowns: Map<string, number> = new Map();
   private responseQueue: Array<{ modelId: string; priority: number }> = [];
   private pendingModels: Set<string> = new Set();
-  private respondedThisRound: Set<string> = new Set();
+  private respondedThisRound: Set<string> = new Set(); // Models that gave opening response
+  private discussionCount: Map<string, number> = new Map(); // Per-model discussion responses
+  private _summarizerModelId: string | null = null; // Random model chosen to summarize when no moderator
+  private _moderatorSettleCount = 0; // Times moderator was triggered by settle (summary/moderation)
   private maxConcurrent = 1;
   private currentlyResponding = 0;
   private onTriggerResponse?: (modelId: string) => void;
@@ -39,11 +48,17 @@ export class ConversationEngine {
 
   /**
    * Start a new round (called when user sends a message).
-   * Resets the roundComplete flag so AI models can respond again.
+   * Resets all per-round state so AI models can respond again.
    */
   startNewRound(): void {
     this._roundComplete = false;
     this.respondedThisRound.clear();
+    this.discussionCount.clear();
+    this._summarizerModelId = null;
+    this._moderatorSettleCount = 0;
+    // Cancel any pending/queued responses from the previous round
+    this.responseQueue = [];
+    this.pendingModels.clear();
   }
 
   get roundComplete(): boolean {
@@ -52,25 +67,50 @@ export class ConversationEngine {
 
   /** True if any models are still queued, pending, or currently responding. */
   get hasPendingWork(): boolean {
-    return this.pendingModels.size > 0 || this.responseQueue.length > 0 || this.currentlyResponding > 0;
+    return (
+      this.pendingModels.size > 0 ||
+      this.responseQueue.length > 0 ||
+      this.currentlyResponding > 0
+    );
   }
 
-  /**
-   * Count ALL consecutive AI messages since the last user message.
-   */
-  private countAiRoundsSinceUser(messages: Message[]): number {
-    let count = 0;
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role === "user") break;
-      if (messages[i].role === "assistant" && !messages[i].isStreaming) {
-        count++;
-      }
+  /** Check if a model has already given its opening response this round. */
+  hasResponded(modelId: string): boolean {
+    return this.respondedThisRound.has(modelId);
+  }
+
+  /** Total number of discussion responses this round (across all models). */
+  get totalDiscussionCount(): number {
+    let total = 0;
+    for (const count of this.discussionCount.values()) {
+      total += count;
     }
-    return count;
+    return total;
+  }
+
+  /** Set a random model as summarizer (used when no AI moderator). */
+  set summarizerModelId(id: string | null) {
+    this._summarizerModelId = id;
+  }
+
+  /** Get the summarizer model ID. */
+  get summarizerModelId(): string | null {
+    return this._summarizerModelId;
+  }
+
+  /** How many times the moderator was triggered for summary/moderation (not counting opening or discussion). */
+  get moderatorSettleCount(): number {
+    return this._moderatorSettleCount;
+  }
+
+  /** Record a settle-triggered moderator intervention. */
+  incrementModeratorSettle(): void {
+    this._moderatorSettleCount++;
   }
 
   /**
    * Count how many times THIS specific model has responded since the last user message.
+   * Used as a safety net — the primary control is respondedThisRound + discussionCount.
    */
   private countModelRoundsSinceUser(
     messages: Message[],
@@ -111,26 +151,28 @@ export class ConversationEngine {
 
     const isModerator = model.id === moderatorId;
 
-    // Check @mention first (bypasses all limits including per-round tracking)
+    // ── Check @mentions: user vs AI ──
     const escaped = escapeRegex(model.shortName.toLowerCase());
     const mentionPattern = new RegExp(`@${escaped}\\b`, "i");
-    const isMentioned = mentionPattern.test(latestMessage.content);
+    const hasAllMention = /@all\b/i.test(latestMessage.content);
+    const isMentionedByUser =
+      latestMessage.role === "user" &&
+      (mentionPattern.test(latestMessage.content) || hasAllMention);
+    const isMentionedByAI =
+      latestMessage.role === "assistant" &&
+      (mentionPattern.test(latestMessage.content) || hasAllMention);
 
-    // Already responded this round — only @mentions can override
-    if (this.respondedThisRound.has(model.id) && !isMentioned) {
-      return { shouldRespond: false, delay: 0, priority: 0 };
+    // ── 1. User @mention: bypass all limits, highest priority ──
+    if (isMentionedByUser) {
+      return {
+        shouldRespond: true,
+        delay: 500 + Math.random() * 1000,
+        priority: 100,
+      };
     }
 
-    let priority = 0;
-    let shouldRespond = false;
-
-    if (isMentioned) {
-      shouldRespond = true;
-      priority = 100;
-    }
-
-    // If user's message has directed @mentions, only mentioned models respond
-    if (latestMessage.role === "user" && !isMentioned) {
+    // If user's message has directed @mentions for OTHER models, this model stays silent
+    if (latestMessage.role === "user") {
       const hasDirectedMention = activeModels.some((m) => {
         const esc = escapeRegex(m.shortName.toLowerCase());
         const pat = new RegExp(`@${esc}\\b`, "i");
@@ -141,98 +183,48 @@ export class ConversationEngine {
       }
     }
 
-    // Check cooldown (10 seconds) — but @mentions bypass this
-    const lastResponse = this.cooldowns.get(model.id) || 0;
-    const isOnCooldown = Date.now() - lastResponse < 10000;
-
-    if (isOnCooldown && !isMentioned) {
-      return { shouldRespond: false, delay: 0, priority: 0 };
-    }
-
-    const aiRounds = this.countAiRoundsSinceUser(messages);
-    const modelRounds = this.countModelRoundsSinceUser(messages, model.id);
-
-    // Count active non-moderator, non-failed models
-    const nonModeratorCount = activeModels.filter(
-      (m) => m.id !== moderatorId && !failedModelIds?.has(m.id)
-    ).length;
-
-    // ── CRITICAL: After moderator has spoken, STOP all non-moderator responses ──
-    // The moderator's summary is the final word in each round.
-    // Only a new user message or explicit @mention restarts the cycle.
-    if (moderatorId && !isMentioned && !isModerator) {
-      const moderatorHasSpoken = this.countModelRoundsSinceUser(messages, moderatorId) > 0;
-      if (moderatorHasSpoken) {
-        return { shouldRespond: false, delay: 0, priority: 0 };
-      }
-    }
-
-    // ── Total AI round cap ──
-    // With moderator: all non-mods respond once + 1 moderator summary
-    // Without moderator: each model responds once (rebuttals via @mentions only)
-    const maxTotalRounds = moderatorId
-      ? nonModeratorCount + MAX_MODERATOR_ROUNDS
-      : activeModels.length;
-
-    if (!isMentioned && aiRounds >= maxTotalRounds) {
-      return { shouldRespond: false, delay: 0, priority: 0 };
-    }
-
-    // Per-model limit (unless @mentioned)
-    if (!isMentioned && modelRounds >= MAX_PER_MODEL) {
-      return { shouldRespond: false, delay: 0, priority: 0 };
-    }
-
-    // ── Moderator logic ──
-    if (isModerator && !isMentioned) {
-      // Moderator: max 1 response per round (final summary)
-      if (modelRounds >= MAX_MODERATOR_ROUNDS) {
+    // ── 2. AI @mention: discussion response (bounded) ──
+    if (isMentionedByAI) {
+      // Model must have already spoken in opening to give a discussion response.
+      // If it hasn't spoken yet, it's still in the queue and will address points in its opening.
+      if (!this.respondedThisRound.has(model.id)) {
         return { shouldRespond: false, delay: 0, priority: 0 };
       }
 
-      // Moderator responds to user messages (goes last, lower priority)
-      if (latestMessage.role === "user") {
-        shouldRespond = true;
-        priority = 70;
-      }
-      // Moderator summarizes after non-moderator models have had their say
-      else if (aiRounds >= Math.max(nonModeratorCount, 2)) {
-        shouldRespond = true;
-        priority = 90; // High priority for summary
-      }
-      // Moderator doesn't jump into mid-debate
-      else {
+      // Check per-model and total discussion budgets
+      const modelDiscussion = this.discussionCount.get(model.id) || 0;
+      if (modelDiscussion >= MAX_DISCUSSION_PER_MODEL || this.totalDiscussionCount >= MAX_TOTAL_DISCUSSION) {
         return { shouldRespond: false, delay: 0, priority: 0 };
       }
 
       const readingTime = Math.min(latestMessage.content.length * 15, 2000);
-      const delay = 3000 + readingTime + Math.random() * 1500;
-      return { shouldRespond, delay, priority };
+      const delay = 1500 + readingTime + Math.random() * 1500;
+      return { shouldRespond: true, delay, priority: 70 };
     }
 
-    // ── Non-moderator logic ──
+    // ── 3. Opening response: user message → all models respond ──
 
-    // High priority: User message — all active models respond
-    if (!shouldRespond && latestMessage.role === "user") {
-      shouldRespond = true;
-      priority = 80;
+    // Already spoke in opening → skip
+    if (this.respondedThisRound.has(model.id)) {
+      return { shouldRespond: false, delay: 0, priority: 0 };
     }
 
-    // Medium priority: Another AI's message ends with a question
-    if (!shouldRespond && /\?\s*$/.test(latestMessage.content.trim())) {
-      shouldRespond = true;
-      priority = 60;
+    // Check cooldown (10 seconds)
+    const lastResponse = this.cooldowns.get(model.id) || 0;
+    if (Date.now() - lastResponse < 10000) {
+      return { shouldRespond: false, delay: 0, priority: 0 };
     }
 
-    // NOTE: No random trigger — models only respond when they have a reason
-    // (user message, @mention, or question). This prevents echo chambers.
+    // User message → opening response
+    if (latestMessage.role === "user") {
+      const readingTime = Math.min(latestMessage.content.length * 15, 2000);
+      const baseDelay = 1500 + Math.random() * 2000;
+      // Moderator speaks last in opening (priority 75 vs 80 for others)
+      const priority = isModerator ? 75 : 80;
+      return { shouldRespond: true, delay: baseDelay + readingTime, priority };
+    }
 
-    // Calculate delay based on message length (simulate reading)
-    const readingTime = Math.min(latestMessage.content.length * 15, 2000);
-    const baseDelay = 1500 + Math.random() * 2000;
-    const delay = baseDelay + readingTime;
-
-    return { shouldRespond, delay, priority };
+    return { shouldRespond: false, delay: 0, priority: 0 };
   }
 
   queueResponse(modelId: string, delay: number, priority: number): void {
@@ -252,7 +244,7 @@ export class ConversationEngine {
       if (this.currentlyResponding < this.maxConcurrent) {
         this.triggerResponse(modelId);
       } else {
-        // Insert in priority order
+        // Insert in priority order (higher priority first)
         const insertIndex = this.responseQueue.findIndex(
           (item) => item.priority < priority
         );
@@ -265,9 +257,15 @@ export class ConversationEngine {
     }, delay);
   }
 
-  completeResponse(modelId: string): void {
+  completeResponse(modelId: string, isDiscussion: boolean = false): void {
     this.cooldowns.set(modelId, Date.now());
     this.respondedThisRound.add(modelId);
+    if (isDiscussion) {
+      this.discussionCount.set(
+        modelId,
+        (this.discussionCount.get(modelId) || 0) + 1
+      );
+    }
     this.currentlyResponding--;
     this.pendingModels.delete(modelId);
 
@@ -298,6 +296,9 @@ export class ConversationEngine {
     this.responseQueue = [];
     this.pendingModels.clear();
     this.respondedThisRound.clear();
+    this.discussionCount.clear();
+    this._summarizerModelId = null;
+    this._moderatorSettleCount = 0;
     this.currentlyResponding = 0;
     this._roundComplete = false;
   }
@@ -336,20 +337,24 @@ export function buildSystemPrompt(
 
 You are ${model.name}, acting as the MODERATOR of this debate. ${othersText}
 
-Your role as moderator:
-- Guide the discussion — ask clarifying questions, redirect off-topic tangents
-- After participants have debated, provide a concise summary of the key arguments
-- Identify areas of agreement and remaining disagreements
-- When consensus is reached, clearly state the conclusion with a justified final answer
-- When the debate is exhausted (no new arguments), wrap up with a final summary
-- You can address participants using @mentions (e.g., @${otherModels[0] || "User"})
+You are both a participant and a moderator — you share your own opinions AND guide the discussion.
+
+Your role:
+OPENING: Share your own substantive perspective on the topic. You speak last among participants to hear all views first.
+DISCUSSION: Evaluate other participants' arguments. Challenge weak points, support strong ones, ask probing questions. You can @mention participants (e.g., @${otherModels[0] || "User"}) to direct questions at them. Use @ALL to address everyone when you want all participants to respond to a specific point.
+SUMMARY: When the discussion naturally concludes (consensus reached, no new arguments, or impasse), provide a final summary:
+  - Key arguments from all sides
+  - Areas of agreement and disagreement
+  - Your justified conclusion that answers the original question
+
 - The human user has ultimate authority — follow their direction if they intervene
-- Keep your moderator responses focused and structured
-- Do NOT take sides in the debate — remain neutral and analytical
+- Keep responses focused, structured, and compact — avoid repetition
+- Use @mentions ONLY for direct questions/challenges, not for attribution. Use names without @ for references.
+- During discussion, be as precise and compact as possible — state your opinion clearly without filler
 
-CRITICAL: Your summary CONCLUDES the round. After you summarize, participants will NOT respond further — the discussion pauses until the user speaks again. Make your summary comprehensive and final. End with a clear, justified conclusion that answers the original question.
+CRITICAL: When you give your final summary/conclusion, it CONCLUDES the round. Participants will NOT respond further. Make it comprehensive. End with a clear, justified answer to the original question.
 
-CRITICAL LANGUAGE RULE: You MUST respond in the same language the user used in their message. If the user writes in Ukrainian, respond in Ukrainian. If in English, respond in English. Always match the user's language. This applies to all your responses without exception.`;
+CRITICAL LANGUAGE RULE: You MUST respond in the same language the user used in their message. If the user writes in Ukrainian, respond in Ukrainian. If in English, respond in English. Always match the user's language.`;
   }
 
   return `${dateLine}
@@ -365,9 +370,13 @@ Rules:
 - Build on good arguments made by others — acknowledge strong points
 - Work toward finding consensus where possible, but never agree superficially
 - The human user is the moderator — they guide the discussion and can intervene at any time. Follow their direction.
-- You can address others using @mentions (e.g., @${otherModels[0] || "User"})
-- If directly addressed with @${model.shortName}, you must respond
-- Keep responses focused and substantive (2-4 sentences usually, unless more detail is warranted)
+- You can reference other participants by name (e.g., "${otherModels[0] || "User"}") when attributing arguments
+- Use @mentions (e.g., @${otherModels[0] || "User"}) ONLY when you are directly asking a question or issuing a challenge to a specific participant. Do NOT use @mentions for simple attribution or agreement — just use their name without @
+- Use @ALL when you want ALL participants to respond to a specific point or question
+- If the human user addresses you with @${model.shortName} or @ALL, respond directly to their question
+- If another AI participant @mentions you or uses @ALL, you may get a brief rebuttal opportunity — keep rebuttals concise (1-3 sentences) and focused on the specific point raised
+- Keep opening responses focused and substantive (2-4 paragraphs usually, unless more detail is warranted)
+- During discussion, be as precise and compact as possible — state your opinion clearly without filler. Long messages are allowed ONLY when the topic genuinely requires detailed explanation (code examples, complex reasoning chains). Default to brevity.
 
 CRITICAL STOP RULES:
 - After the moderator summarizes the debate, DO NOT respond. The round is over. Wait for the user's next message.
@@ -376,6 +385,46 @@ CRITICAL STOP RULES:
 - Only respond when you have a genuinely NEW argument, counterpoint, or insight to contribute.
 
 CRITICAL LANGUAGE RULE: You MUST respond in the same language the user used in their message. If the user writes in Ukrainian, respond in Ukrainian. If in English, respond in English. Always match the user's language. This applies to all your responses without exception.`;
+}
+
+/**
+ * System prompt for a random model chosen to summarize when no AI moderator is set.
+ */
+export function buildSummaryPrompt(
+  model: Model,
+  activeModels: Model[]
+): string {
+  const otherModels = activeModels
+    .filter((m) => m.id !== model.id)
+    .map((m) => m.shortName);
+
+  const now = new Date();
+  const currentDate = now.toLocaleDateString("en-US", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+  const currentTime = now.toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZoneName: "short",
+  });
+
+  return `Current date: ${currentDate}, ${currentTime}.
+
+You are ${model.name}. You have been selected to provide a BRIEF SUMMARY of this debate round.
+
+The other participants were: ${otherModels.join(", ")}.
+
+Your task:
+- Summarize the key arguments from all participants (2-4 sentences)
+- Note areas of agreement and disagreement
+- If a consensus emerged, state the conclusion clearly
+- Do NOT add new arguments — only summarize what was said
+- Be neutral and balanced — represent all viewpoints fairly
+
+CRITICAL LANGUAGE RULE: You MUST respond in the same language the user used in their message. If the user writes in Ukrainian, respond in Ukrainian. If in English, respond in English. Always match the user's language.`;
 }
 
 function formatUserContent(
