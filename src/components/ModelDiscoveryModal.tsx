@@ -42,6 +42,15 @@ export function ModelDiscoveryModal({ isOpen, onClose }: ModelDiscoveryModalProp
     }
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose]);
+
   const fetchModels = async () => {
     try {
       setLoading(true);
