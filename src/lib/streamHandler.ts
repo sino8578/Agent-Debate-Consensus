@@ -35,7 +35,8 @@ export function hasActiveStreams(): boolean {
 export async function streamModelResponse(
   modelId: string,
   messages: { role: string; content: string }[],
-  callbacks: StreamCallbacks
+  callbacks: StreamCallbacks,
+  options?: { temperature?: number }
 ): Promise<void> {
   const { onToken, onComplete, onError } = callbacks;
 
@@ -50,7 +51,7 @@ export async function streamModelResponse(
         "Content-Type": "application/json",
         ...getApiKeyHeader(),
       },
-      body: JSON.stringify({ model: modelId, messages }),
+      body: JSON.stringify({ model: modelId, messages, temperature: options?.temperature }),
       signal: controller.signal,
     });
 

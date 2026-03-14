@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { v4 as uuidv4 } from "uuid";
-import { ChatState, Model, Message, Theme } from "@/types/chat";
+import { ChatState, Model, Message, Theme, TemperaturePreset, DebateSession } from "@/types/chat";
 import { availableModels as defaultModels } from "@/lib/models";
 
 export const useChatStore = create<ChatState>()(
@@ -18,6 +18,9 @@ export const useChatStore = create<ChatState>()(
       publicMode: null,
       apiKey: null,
       failedModels: {},
+      temperature: "balanced" as TemperaturePreset,
+      sessions: [],
+      currentSessionId: null,
 
       addMessage: (message) => {
         const id = uuidv4();
@@ -147,6 +150,159 @@ export const useChatStore = create<ChatState>()(
         }),
 
       initializeModels: (models) => set({ availableModels: models }),
+
+      setTemperature: (preset) => set({ temperature: preset }),
+
+      saveCurrentSession: () =>
+        set((state) => {
+          const now = Date.now();
+          const firstUserMsg = state.messages.find((m) => m.role === "user");
+          const title = firstUserMsg
+            ? firstUserMsg.content.slice(0, 60)
+            : "New Debate";
+          const activeModelIds = state.activeModels.map((m) => m.id);
+
+          if (state.currentSessionId) {
+            const sessions = state.sessions.map((s) =>
+              s.id === state.currentSessionId
+                ? {
+                    ...s,
+                    messages: state.messages,
+                    activeModelIds,
+                    moderatorId: state.moderatorId,
+                    temperature: state.temperature,
+                    updatedAt: now,
+                  }
+                : s
+            );
+            return { sessions };
+          } else {
+            const id = uuidv4();
+            const newSession: DebateSession = {
+              id,
+              title,
+              messages: state.messages,
+              activeModelIds,
+              moderatorId: state.moderatorId,
+              temperature: state.temperature,
+              createdAt: now,
+              updatedAt: now,
+            };
+            return { sessions: [...state.sessions, newSession], currentSessionId: id };
+          }
+        }),
+
+      loadSession: (id) =>
+        set((state) => {
+          // Save current if there are messages
+          let updatedSessions = state.sessions;
+          if (state.messages.length > 0) {
+            const now = Date.now();
+            const firstUserMsg = state.messages.find((m) => m.role === "user");
+            const title = firstUserMsg
+              ? firstUserMsg.content.slice(0, 60)
+              : "New Debate";
+            const activeModelIds = state.activeModels.map((m) => m.id);
+            if (state.currentSessionId) {
+              updatedSessions = state.sessions.map((s) =>
+                s.id === state.currentSessionId
+                  ? {
+                      ...s,
+                      messages: state.messages,
+                      activeModelIds,
+                      moderatorId: state.moderatorId,
+                      temperature: state.temperature,
+                      updatedAt: now,
+                    }
+                  : s
+              );
+            } else {
+              const newId = uuidv4();
+              const newSession: DebateSession = {
+                id: newId,
+                title,
+                messages: state.messages,
+                activeModelIds,
+                moderatorId: state.moderatorId,
+                temperature: state.temperature,
+                createdAt: now,
+                updatedAt: now,
+              };
+              updatedSessions = [...state.sessions, newSession];
+            }
+          }
+
+          const session = updatedSessions.find((s) => s.id === id);
+          if (!session) return { sessions: updatedSessions };
+
+          const restoredActiveModels = state.availableModels.filter((m) =>
+            session.activeModelIds.includes(m.id)
+          );
+
+          return {
+            sessions: updatedSessions,
+            messages: session.messages,
+            activeModels: restoredActiveModels,
+            moderatorId: session.moderatorId,
+            temperature: session.temperature,
+            currentSessionId: id,
+            typingModels: [],
+            failedModels: {},
+          };
+        }),
+
+      deleteSession: (id) =>
+        set((state) => ({
+          sessions: state.sessions.filter((s) => s.id !== id),
+          currentSessionId: state.currentSessionId === id ? null : state.currentSessionId,
+        })),
+
+      newDebate: () =>
+        set((state) => {
+          let updatedSessions = state.sessions;
+          if (state.messages.length > 0) {
+            const now = Date.now();
+            const firstUserMsg = state.messages.find((m) => m.role === "user");
+            const title = firstUserMsg
+              ? firstUserMsg.content.slice(0, 60)
+              : "New Debate";
+            const activeModelIds = state.activeModels.map((m) => m.id);
+            if (state.currentSessionId) {
+              updatedSessions = state.sessions.map((s) =>
+                s.id === state.currentSessionId
+                  ? {
+                      ...s,
+                      messages: state.messages,
+                      activeModelIds,
+                      moderatorId: state.moderatorId,
+                      temperature: state.temperature,
+                      updatedAt: now,
+                    }
+                  : s
+              );
+            } else {
+              const newId = uuidv4();
+              const newSession: DebateSession = {
+                id: newId,
+                title,
+                messages: state.messages,
+                activeModelIds,
+                moderatorId: state.moderatorId,
+                temperature: state.temperature,
+                createdAt: now,
+                updatedAt: now,
+              };
+              updatedSessions = [...state.sessions, newSession];
+            }
+          }
+          return {
+            sessions: updatedSessions,
+            messages: [],
+            typingModels: [],
+            failedModels: {},
+            currentSessionId: uuidv4(),
+          };
+        }),
     }),
     {
       name: "chat-storage",
@@ -157,6 +313,8 @@ export const useChatStore = create<ChatState>()(
         contextWindowSize: state.contextWindowSize,
         theme: state.theme,
         fontSize: state.fontSize,
+        sessions: state.sessions,
+        temperature: state.temperature,
       }),
     }
   )

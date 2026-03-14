@@ -27,12 +27,13 @@ export async function POST(req: NextRequest) {
   });
 
   try {
-    const { messages, model } = await req.json();
+    const { messages, model, temperature } = await req.json();
 
     const stream = await openai.chat.completions.create({
       model: model,
       messages: messages,
       stream: true,
+      temperature: temperature ?? 0.7,
     });
 
     const encoder = new TextEncoder();

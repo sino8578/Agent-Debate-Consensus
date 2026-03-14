@@ -31,6 +31,19 @@ export interface TypingState {
 
 export type Theme = "light" | "dark";
 
+export type TemperaturePreset = "creative" | "balanced" | "precise";
+
+export interface DebateSession {
+  id: string;
+  title: string;
+  messages: Message[];
+  activeModelIds: string[];
+  moderatorId: string | null;
+  temperature: TemperaturePreset;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface ChatState {
   messages: Message[];
   activeModels: Model[];
@@ -63,4 +76,12 @@ export interface ChatState {
   markModelFailed: (modelId: string, reason: string) => void;
   clearModelFailed: (modelId: string) => void;
   initializeModels: (models: Model[]) => void;
+  temperature: TemperaturePreset;
+  sessions: DebateSession[];
+  currentSessionId: string | null;
+  setTemperature: (preset: TemperaturePreset) => void;
+  saveCurrentSession: () => void;
+  loadSession: (id: string) => void;
+  deleteSession: (id: string) => void;
+  newDebate: () => void;
 }

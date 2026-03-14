@@ -4,8 +4,13 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { useChatStore } from "@/store/chatStore";
 import { MessageBubble } from "./MessageBubble";
 import { TypingIndicator } from "./TypingIndicator";
+import { TopicBanner } from "./TopicBanner";
 
-export function MessageList() {
+interface Props {
+  onBoost?: (content: string, modelName: string) => void;
+}
+
+export function MessageList({ onBoost }: Props) {
   const messages = useChatStore((state) => state.messages);
   const typingModels = useChatStore((state) => state.typingModels);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -61,8 +66,9 @@ export function MessageList() {
         </div>
       ) : (
         <>
+          <TopicBanner />
           {messages.map((message) => (
-            <MessageBubble key={message.id} message={message} />
+            <MessageBubble key={message.id} message={message} onBoost={onBoost} />
           ))}
         </>
       )}

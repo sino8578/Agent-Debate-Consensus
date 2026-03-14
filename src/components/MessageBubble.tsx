@@ -76,9 +76,10 @@ const COLLAPSE_THRESHOLD = 300; // pixels
 
 interface Props {
   message: Message;
+  onBoost?: (content: string, modelName: string) => void;
 }
 
-export function MessageBubble({ message }: Props) {
+export function MessageBubble({ message, onBoost }: Props) {
   const activeModels = useChatStore((state) => state.activeModels);
   const availableModels = useChatStore((state) => state.availableModels);
   const fontSize = useChatStore((state) => state.fontSize);
@@ -182,6 +183,17 @@ export function MessageBubble({ message }: Props) {
                 </svg>
               )}
             </button>
+            {onBoost && (
+              <button
+                onClick={() => onBoost(message.content, message.modelName ?? "Agent")}
+                className="opacity-0 group-hover/msg:opacity-100 p-0.5 rounded hover:bg-elevated transition-all duration-150 text-muted/60 hover:text-amber-400"
+                title="Develop this idea further"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+              </button>
+            )}
           </div>
 
           {message.reasoning && (
