@@ -108,6 +108,25 @@ MAX_ACTIVE_MODELS=8
 
 Відкрийте [http://localhost:3000](http://localhost:3000) в браузері.
 
+### Оновлення
+
+**Якщо встановлювали через Git Clone:**
+```bash
+git pull origin main
+npm install
+```
+
+**Якщо встановлювали через NPX degit:**
+```bash
+npx degit Lexus2016/Agent-Debate-Consensus my-debate-updated
+```
+Потім перенесіть `.env.local` зі старої директорії в нову.
+
+**Встановити конкретну версію:**
+```bash
+npx degit Lexus2016/Agent-Debate-Consensus#v2.1.0 my-debate
+```
+
 ---
 
 ## Як користуватися платформою
@@ -221,14 +240,11 @@ Response:
 
 ## Змінні оточення
 
-```env
-# ОБОВ'ЯЗКОВІ ДЛЯ PRODUCTION
-OPENROUTER_API_KEY=sk_...         # OpenRouter API ключ (або залиште порожнім для публічного режиму)
-
-# ОПЦІОНАЛЬНІ
-MAX_ACTIVE_MODELS=8                # Макс. одночасних агентів (за замовчуванням 8)
-NEXT_PUBLIC_DEMO_MODE=true         # Публічний режим — користувачі вводять свої ключі
-```
+| Змінна | За замовч. | Опис |
+|--------|-----------|------|
+| `OPENROUTER_API_KEY` | (порожньо) | API ключ OpenRouter. Залиште порожнім для публічного режиму. |
+| `APP_MODE` | `private` | `private` — повний доступ з серверним ключем. `public` — безкоштовні моделі без ключа, платні — з ключем користувача. |
+| `MAX_ACTIVE_MODELS` | `8` | Макс. одночасних агентів у дебатах. |
 
 ---
 

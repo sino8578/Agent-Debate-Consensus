@@ -185,6 +185,25 @@ MAX_ACTIVE_MODELS=8
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
 
+### Updating
+
+**If you installed via Git Clone:**
+```bash
+git pull origin main
+npm install
+```
+
+**If you installed via NPX degit:**
+```bash
+npx degit Lexus2016/Agent-Debate-Consensus my-debate-updated
+```
+Then copy your `.env.local` from the old directory to the new one.
+
+**Install a specific version:**
+```bash
+npx degit Lexus2016/Agent-Debate-Consensus#v2.1.0 my-debate
+```
+
 ---
 
 ## Usage
@@ -244,6 +263,7 @@ npm run lint     # Check code quality with ESLint
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OPENROUTER_API_KEY` | (empty) | Your OpenRouter API key. Leave empty for public mode. |
+| `APP_MODE` | `private` | `private` — full access with server key. `public` — free models without key, paid models require user key. |
 | `MAX_ACTIVE_MODELS` | `8` | Maximum simultaneous debate participants. Adjust based on your OpenRouter plan. |
 
 ---
