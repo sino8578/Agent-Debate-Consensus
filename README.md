@@ -94,6 +94,9 @@ Browse and add 400+ models from OpenRouter's catalog. Not satisfied with the def
 
 The lineup you build is yours.
 
+### Web Search
+Toggle the globe icon in the chat input to enable real-time web search for all models. Powered by OpenRouter's `:online` mode — models access current internet data alongside their training knowledge. When enabled, every model response is augmented with fresh web results. The globe icon shows a strikethrough line when disabled for clear visual feedback. Uses native search for providers like Anthropic, OpenAI, and xAI; Exa engine for all others (~$0.02 per request).
+
 ### Extended Thinking Support
 Models with reasoning/chain-of-thought capabilities show their working. Thinking steps collapse by default ("Thinking..." section), expandable for full transparency into model reasoning.
 

@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { messages, model, temperature } = body;
+    const { messages, model, temperature, webSearch } = body;
 
     // Input validation
     if (!model || typeof model !== "string") {
@@ -68,8 +68,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const effectiveModel = webSearch ? `${model}:online` : model;
+
     const stream = await openai.chat.completions.create({
-      model,
+      model: effectiveModel,
       messages,
       stream: true,
       temperature: temp,

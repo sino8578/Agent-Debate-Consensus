@@ -21,7 +21,7 @@ export function ChatInput({ onSend, onStop, disabled, isGenerating }: Props) {
   const [mentionOpen, setMentionOpen] = useState(false);
   const [mentionIndex, setMentionIndex] = useState(0);
 
-  const { activeModels, availableModels } = useChatStore();
+  const { activeModels, availableModels, webSearchEnabled, setWebSearch } = useChatStore();
 
   const allModels: Model[] = [
     ...activeModels,
@@ -186,6 +186,24 @@ export function ChatInput({ onSend, onStop, disabled, isGenerating }: Props) {
           />
 
           <div className="flex items-center gap-1.5 flex-shrink-0 pb-0.5">
+            <button
+              onClick={() => setWebSearch(!webSearchEnabled)}
+              title={webSearchEnabled ? "Web search ON — click to disable" : "Web search OFF — click to enable"}
+              className={`w-[30px] h-[30px] flex items-center justify-center rounded-full transition-all duration-200 relative ${
+                webSearchEnabled
+                  ? "bg-primary/15 text-primary ring-1 ring-primary/30"
+                  : "text-muted/40 hover:text-muted hover:bg-surface-hover"
+              }`}
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                <circle cx="12" cy="12" r="10" />
+                <path d="M2 12h20" />
+                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                {!webSearchEnabled && (
+                  <line x1="4" y1="4" x2="20" y2="20" strokeWidth={2} strokeLinecap="round" />
+                )}
+              </svg>
+            </button>
             {isGenerating && (
               <button
                 onClick={onStop}

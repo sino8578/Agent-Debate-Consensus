@@ -209,7 +209,7 @@ function ChatApp() {
           conversationEngine.completeResponse(modelId);
           markModelFailed(modelId, error.message);
         },
-      }, { temperature: TEMP_MAP[state.temperature] });
+      }, { temperature: TEMP_MAP[state.temperature], webSearch: state.webSearchEnabled });
     },
     [addMessage, updateMessage, completeMessage, removeMessage, setTyping, contextWindowSize, markModelFailed, clearModelFailed]
   );

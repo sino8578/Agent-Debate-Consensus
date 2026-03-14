@@ -37,5 +37,9 @@ next-env.d.ts
 # Testing
 coverage/
 
+# Agent tooling
+.omc/
+.serena/
+
 # Misc
 *.pem
