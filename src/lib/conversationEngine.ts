@@ -38,12 +38,15 @@ export class ConversationEngine {
     model: Model,
     messages: Message[],
     latestMessage: Message,
-    activeModels: Model[]
+    activeModels: Model[],
+    moderatorId?: string | null
   ): ResponseDecision {
     // Don't respond to own messages
     if (latestMessage.modelId === model.id) {
       return { shouldRespond: false, delay: 0, priority: 0 };
     }
+
+    const isModerator = model.id === moderatorId;
 
     let priority = 0;
     let shouldRespond = false;
@@ -65,9 +68,31 @@ export class ConversationEngine {
       return { shouldRespond: false, delay: 0, priority: 0 };
     }
 
-    // Check round limit — don't auto-respond if too many AI rounds without user
-    // @mentions and user messages bypass this
     const aiRounds = this.countAiRoundsSinceUser(messages);
+
+    // Moderator logic: respond after round limit to summarize
+    if (isModerator && !isMentioned) {
+      // Moderator responds to user messages
+      if (latestMessage.role === "user") {
+        shouldRespond = true;
+        priority = 70; // Slightly lower than regular models so it goes after them
+      }
+      // Moderator summarizes after the round limit is reached
+      else if (aiRounds >= MAX_AI_ROUNDS) {
+        shouldRespond = true;
+        priority = 90; // High priority for summary
+      }
+      // Moderator doesn't jump into mid-debate randomly
+      else {
+        return { shouldRespond: false, delay: 0, priority: 0 };
+      }
+
+      const readingTime = Math.min(latestMessage.content.length * 15, 2000);
+      const delay = 3000 + readingTime + Math.random() * 1500; // Longer delay — waits for others
+      return { shouldRespond, delay, priority };
+    }
+
+    // Regular model: check round limit
     if (!isMentioned && latestMessage.role !== "user" && aiRounds >= MAX_AI_ROUNDS) {
       return { shouldRespond: false, delay: 0, priority: 0 };
     }
@@ -156,7 +181,11 @@ export class ConversationEngine {
   }
 }
 
-export function buildSystemPrompt(model: Model, activeModels: Model[]): string {
+export function buildSystemPrompt(
+  model: Model,
+  activeModels: Model[],
+  isModerator: boolean = false
+): string {
   const otherModels = activeModels
     .filter((m) => m.id !== model.id)
     .map((m) => m.shortName);
@@ -165,6 +194,21 @@ export function buildSystemPrompt(model: Model, activeModels: Model[]): string {
     otherModels.length > 0
       ? `The other AI participants are: ${otherModels.join(", ")}.`
       : "You are the only AI in this chat.";
+
+  if (isModerator) {
+    return `You are ${model.name}, acting as the MODERATOR of this debate. ${othersText}
+
+Your role as moderator:
+- Guide the discussion — ask clarifying questions, redirect off-topic tangents
+- After participants have debated, provide a concise summary of the key arguments
+- Identify areas of agreement and remaining disagreements
+- When consensus is reached, clearly state the conclusion
+- When the debate is exhausted (no new arguments), wrap up with a final summary
+- You can address participants using @mentions (e.g., @${otherModels[0] || "User"})
+- The human user has ultimate authority — follow their direction if they intervene
+- Keep your moderator responses focused and structured
+- Do NOT take sides in the debate — remain neutral and analytical`;
+  }
 
   return `You are ${model.name}, participating in a structured debate with a human moderator${otherModels.length > 0 ? " and other AI models" : ""}.
 

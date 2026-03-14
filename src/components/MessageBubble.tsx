@@ -13,6 +13,7 @@ export function MessageBubble({ message }: Props) {
   const activeModels = useChatStore((state) => state.activeModels);
   const availableModels = useChatStore((state) => state.availableModels);
   const fontSize = useChatStore((state) => state.fontSize);
+  const moderatorId = useChatStore((state) => state.moderatorId);
   const [reasoningOpen, setReasoningOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const isUser = message.role === "user";
@@ -128,6 +129,9 @@ export function MessageBubble({ message }: Props) {
             >
               {message.modelName ?? "Agent"}
             </span>
+            {message.modelId === moderatorId && (
+              <span className="text-[9px] text-amber-400" title="Moderator">&#9733; mod</span>
+            )}
             <button
               onClick={handleCopy}
               className="opacity-0 group-hover/msg:opacity-100 p-0.5 rounded hover:bg-elevated transition-all duration-150"

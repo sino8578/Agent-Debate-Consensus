@@ -39,6 +39,7 @@ export interface ChatState {
   contextWindowSize: number;
   theme: Theme;
   fontSize: number;
+  moderatorId: string | null;
   publicMode: boolean | null;
   apiKey: string | null;
 
@@ -53,6 +54,7 @@ export interface ChatState {
   setContextWindowSize: (size: number) => void;
   setTheme: (theme: Theme) => void;
   setFontSize: (size: number) => void;
+  setModerator: (modelId: string | null) => void;
   setPublicMode: (mode: boolean) => void;
   setApiKey: (key: string) => void;
   clearApiKey: () => void;

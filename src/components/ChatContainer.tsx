@@ -96,6 +96,7 @@ function ChatApp() {
   const clearApiKey = useChatStore((state) => state.clearApiKey);
   const fontSize = useChatStore((state) => state.fontSize);
   const setFontSize = useChatStore((state) => state.setFontSize);
+  const moderatorId = useChatStore((state) => state.moderatorId);
 
   const isGenerating = typingModels.length > 0 || messages.some((m) => m.isStreaming);
 
@@ -121,7 +122,8 @@ function ChatApp() {
 
       setTyping(modelId, model.name, true);
 
-      const systemPrompt = buildSystemPrompt(model, state.activeModels);
+      const isModerator = model.id === state.moderatorId;
+      const systemPrompt = buildSystemPrompt(model, state.activeModels, isModerator);
       const contextMessages = buildContextWindow(
         state.messages,
         contextWindowSize,
@@ -194,7 +196,8 @@ function ChatApp() {
           model,
           state.messages,
           latestMessage,
-          state.activeModels
+          state.activeModels,
+          state.moderatorId
         );
 
         if (decision.shouldRespond) {

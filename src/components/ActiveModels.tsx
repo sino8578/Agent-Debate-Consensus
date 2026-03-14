@@ -4,6 +4,7 @@ import { useChatStore } from "@/store/chatStore";
 
 export function ActiveModels() {
   const activeModels = useChatStore((state) => state.activeModels);
+  const moderatorId = useChatStore((state) => state.moderatorId);
 
   if (activeModels.length === 0) {
     return (
@@ -25,6 +26,9 @@ export function ActiveModels() {
             style={{ backgroundColor: model.color }}
           />
           {model.shortName}
+          {model.id === moderatorId && (
+            <span className="text-[9px] text-amber-400" title="Moderator">&#9733;</span>
+          )}
         </div>
       ))}
     </div>

@@ -14,6 +14,7 @@ export const useChatStore = create<ChatState>()(
       contextWindowSize: 20,
       theme: "dark" as Theme,
       fontSize: 15,
+      moderatorId: null,
       publicMode: null,
       apiKey: null,
 
@@ -99,6 +100,8 @@ export const useChatStore = create<ChatState>()(
       },
 
       setFontSize: (size) => set({ fontSize: size }),
+
+      setModerator: (modelId) => set({ moderatorId: modelId }),
 
       setPublicMode: (mode) => set({ publicMode: mode }),
 

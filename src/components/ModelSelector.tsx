@@ -11,6 +11,8 @@ export function ModelSelector() {
   const activeModels = useChatStore((state) => state.activeModels);
   const toggleModel = useChatStore((state) => state.toggleModel);
   const removeModel = useChatStore((state) => state.removeModel);
+  const moderatorId = useChatStore((state) => state.moderatorId);
+  const setModerator = useChatStore((state) => state.setModerator);
 
   return (
     <div>
@@ -31,6 +33,7 @@ export function ModelSelector() {
         {availableModels.map((model) => {
           const isActive = activeModels.some((m) => m.id === model.id);
           const isDefault = defaultModels.some((m) => m.id === model.id);
+          const isModerator = model.id === moderatorId;
 
           return (
             <div key={model.id} className="group relative">
@@ -53,10 +56,33 @@ export function ModelSelector() {
                     {model.name}
                   </div>
                 </div>
-                {isActive && (
+                {isModerator && (
+                  <span className="text-[10px] text-amber-400 flex-shrink-0" title="Moderator">
+                    &#9733;
+                  </span>
+                )}
+                {isActive && !isModerator && (
                   <div className="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0" />
                 )}
               </button>
+
+              {/* Moderator toggle — visible on hover for active models */}
+              {isActive && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setModerator(isModerator ? null : model.id);
+                  }}
+                  className={`absolute right-7 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-md text-[10px] transition-all duration-150 ${
+                    isModerator
+                      ? "text-amber-400 opacity-100"
+                      : "text-muted hover:text-amber-400 opacity-0 group-hover:opacity-100"
+                  }`}
+                  title={isModerator ? "Remove as moderator" : "Set as moderator"}
+                >
+                  &#9733;
+                </button>
+              )}
 
               {!isDefault && (
                 <button
