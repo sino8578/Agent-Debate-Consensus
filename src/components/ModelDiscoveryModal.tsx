@@ -108,7 +108,7 @@ export function ModelDiscoveryModal({ isOpen, onClose }: ModelDiscoveryModalProp
     <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/50 backdrop-blur-sm">
       <div className="bg-surface border border-separator w-full max-w-[560px] max-h-[72vh] rounded-2xl shadow-2xl shadow-black/30 flex flex-col overflow-hidden animate-modal-in">
         <div className="flex items-center justify-between px-5 py-4 border-b border-separator">
-          <h2 className="text-[15px] font-semibold tracking-[-0.01em]">Discover Agents</h2>
+          <h2 className="text-[16px] font-semibold tracking-[-0.01em]">Discover Agents</h2>
           <button
             onClick={onClose}
             className="w-7 h-7 flex items-center justify-center rounded-lg text-muted hover:text-foreground hover:bg-elevated transition-colors duration-150"
@@ -123,7 +123,7 @@ export function ModelDiscoveryModal({ isOpen, onClose }: ModelDiscoveryModalProp
           <input
             type="text"
             placeholder="Search by name or provider..."
-            className="w-full bg-surface-light rounded-lg border border-separator px-3.5 py-2 text-[13px] focus:outline-none focus:border-primary/40 focus:ring-1 focus:ring-primary/20 placeholder:text-muted/40 transition-all duration-150"
+            className="w-full bg-surface-light rounded-lg border border-separator px-3.5 py-2 text-[14px] focus:outline-none focus:border-primary/40 focus:ring-1 focus:ring-primary/20 placeholder:text-muted transition-all duration-150"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             autoFocus
@@ -132,12 +132,12 @@ export function ModelDiscoveryModal({ isOpen, onClose }: ModelDiscoveryModalProp
 
         <div className="flex-1 overflow-y-auto px-3 py-2 space-y-1">
           {loading ? (
-            <div className="flex flex-col items-center justify-center py-16 text-muted/50 gap-3">
+            <div className="flex flex-col items-center justify-center py-16 text-muted gap-3">
               <div className="w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />
-              <span className="text-[13px]">Loading agents...</span>
+              <span className="text-[14px]">Loading agents...</span>
             </div>
           ) : filteredModels.length === 0 ? (
-            <div className="flex items-center justify-center py-16 text-[13px] text-muted/50">
+            <div className="flex items-center justify-center py-16 text-[14px] text-muted">
               No results for &ldquo;{search}&rdquo;
             </div>
           ) : (
@@ -157,14 +157,14 @@ export function ModelDiscoveryModal({ isOpen, onClose }: ModelDiscoveryModalProp
                 >
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-0.5">
-                      <span className="text-[13px] font-medium truncate text-foreground/85">
+                      <span className="text-[14px] font-medium truncate text-foreground/90">
                         {model.name}
                       </span>
-                      <span className="text-[10px] px-1.5 py-[1px] rounded bg-elevated text-muted/50 uppercase tracking-wide flex-shrink-0">
+                      <span className="text-[11px] px-1.5 py-[1px] rounded bg-elevated text-muted uppercase tracking-wide flex-shrink-0">
                         {model.id.split("/")[0]}
                       </span>
                     </div>
-                    <div className="flex items-center gap-3 text-[10px] text-muted/40 font-mono">
+                    <div className="flex items-center gap-3 text-[11px] text-muted font-mono">
                       <span>${promptPrice}/1M in</span>
                       <span>${completionPrice}/1M out</span>
                       <span>{(model.context_length / 1024).toFixed(0)}k ctx</span>
@@ -174,9 +174,9 @@ export function ModelDiscoveryModal({ isOpen, onClose }: ModelDiscoveryModalProp
                   <button
                     onClick={() => handleAddModel(model)}
                     disabled={isAdded}
-                    className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-[12px] font-medium transition-colors duration-150 ${
+                    className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-[13px] font-medium transition-colors duration-150 ${
                       isAdded
-                        ? "text-muted/30 cursor-default"
+                        ? "text-muted/50 cursor-default"
                         : "bg-primary/15 text-primary hover:bg-primary/25"
                     }`}
                   >
@@ -189,7 +189,7 @@ export function ModelDiscoveryModal({ isOpen, onClose }: ModelDiscoveryModalProp
         </div>
 
         <div className="px-5 py-2.5 border-t border-separator text-center">
-          <p className="text-[10px] text-muted/30">
+          <p className="text-[11px] text-muted">
             Powered by OpenRouter
           </p>
         </div>

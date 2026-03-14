@@ -15,23 +15,23 @@ export function TypingIndicator() {
         return (
           <div
             key={typing.modelId}
-            className="flex items-center gap-2 ml-[38px]"
+            className="flex items-center gap-2 ml-[42px]"
           >
-            <span className="text-[11px] text-muted/50 font-medium">
+            <span className="text-[12px] text-muted font-medium">
               {typing.modelName}
             </span>
             <span className="flex items-center gap-[3px]">
               <span
-                className="w-[4px] h-[4px] rounded-full animate-bounce-dot"
-                style={{ backgroundColor: model?.color ?? "#98989d" }}
+                className="w-[5px] h-[5px] rounded-full animate-bounce-dot"
+                style={{ backgroundColor: model?.color ?? "#aeaeb2" }}
               />
               <span
-                className="w-[4px] h-[4px] rounded-full animate-bounce-dot-delay-1"
-                style={{ backgroundColor: model?.color ?? "#98989d" }}
+                className="w-[5px] h-[5px] rounded-full animate-bounce-dot-delay-1"
+                style={{ backgroundColor: model?.color ?? "#aeaeb2" }}
               />
               <span
-                className="w-[4px] h-[4px] rounded-full animate-bounce-dot-delay-2"
-                style={{ backgroundColor: model?.color ?? "#98989d" }}
+                className="w-[5px] h-[5px] rounded-full animate-bounce-dot-delay-2"
+                style={{ backgroundColor: model?.color ?? "#aeaeb2" }}
               />
             </span>
           </div>

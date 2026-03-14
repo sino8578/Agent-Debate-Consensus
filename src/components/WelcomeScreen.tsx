@@ -43,7 +43,7 @@ export function WelcomeScreen() {
 
   return (
     <div className="h-screen flex items-center justify-center bg-background p-6">
-      <div className="w-full max-w-[420px] animate-fade-in">
+      <div className="w-full max-w-[440px] animate-fade-in">
         {/* Logo */}
         <div className="flex flex-col items-center mb-8">
           <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary to-accent flex items-center justify-center mb-5 shadow-lg shadow-primary/20">
@@ -51,10 +51,10 @@ export function WelcomeScreen() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
             </svg>
           </div>
-          <h1 className="text-[22px] font-semibold tracking-[-0.02em] mb-2">
+          <h1 className="text-[24px] font-semibold tracking-[-0.02em] mb-2">
             Agent Debate Consensus
           </h1>
-          <p className="text-[14px] text-muted text-center leading-relaxed max-w-[340px]">
+          <p className="text-[15px] text-muted text-center leading-relaxed max-w-[360px]">
             Multi-agent debate platform where AI models discuss, argue,
             and find consensus on any topic you choose.
           </p>
@@ -72,14 +72,14 @@ export function WelcomeScreen() {
               <svg className="w-4 h-4 text-primary flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
                 <path strokeLinecap="round" strokeLinejoin="round" d={f.icon} />
               </svg>
-              <span className="text-[12px] text-foreground/70">{f.label}</span>
+              <span className="text-[13px] text-foreground/80">{f.label}</span>
             </div>
           ))}
         </div>
 
         {/* API Key input */}
         <div className="space-y-3 mb-4">
-          <label className="block text-[12px] font-medium text-muted uppercase tracking-[0.05em]">
+          <label className="block text-[13px] font-medium text-muted uppercase tracking-[0.05em]">
             OpenRouter API Key
           </label>
           <input
@@ -89,27 +89,27 @@ export function WelcomeScreen() {
             onKeyDown={handleKeyDown}
             placeholder="sk-or-v1-..."
             autoFocus
-            className="w-full bg-surface-light rounded-xl border border-separator px-4 py-3 text-[14px] focus:outline-none focus:border-primary/40 focus:ring-1 focus:ring-primary/20 placeholder:text-muted/30 transition-all duration-150 font-mono"
+            className="w-full bg-surface-light rounded-xl border border-separator px-4 py-3 text-[15px] focus:outline-none focus:border-primary/40 focus:ring-1 focus:ring-primary/20 placeholder:text-muted/50 transition-all duration-150 font-mono"
           />
           {error && (
-            <p className="text-[12px] text-red-400">{error}</p>
+            <p className="text-[13px] text-red-400">{error}</p>
           )}
         </div>
 
         <button
           onClick={handleSubmit}
           disabled={!key.trim() || validating}
-          className="w-full h-11 rounded-xl bg-primary text-white text-[14px] font-medium transition-all duration-150 hover:bg-primary-hover active:scale-[0.98] disabled:opacity-30 disabled:cursor-not-allowed"
+          className="w-full h-11 rounded-xl bg-primary text-white text-[15px] font-medium transition-all duration-150 hover:bg-primary-hover active:scale-[0.98] disabled:opacity-30 disabled:cursor-not-allowed"
         >
           {validating ? "Validating..." : "Start Debating"}
         </button>
 
         {/* Privacy note */}
         <div className="flex items-start gap-2 mt-4 px-1">
-          <svg className="w-3.5 h-3.5 text-muted/40 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <svg className="w-3.5 h-3.5 text-muted flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
           </svg>
-          <p className="text-[11px] text-muted/40 leading-relaxed">
+          <p className="text-[12px] text-muted leading-relaxed">
             Your key is stored only in your browser session and is never saved on our servers.
             It is used solely to make requests to OpenRouter on your behalf.
             Closing the tab will erase the key.
@@ -117,21 +117,21 @@ export function WelcomeScreen() {
         </div>
 
         {/* Footer links */}
-        <div className="flex items-center justify-center gap-4 mt-8 text-[11px] text-muted/40">
+        <div className="flex items-center justify-center gap-4 mt-8 text-[12px] text-muted">
           <a
             href="https://openrouter.ai/keys"
             target="_blank"
             rel="noopener noreferrer"
-            className="hover:text-muted transition-colors duration-150"
+            className="hover:text-foreground transition-colors duration-150"
           >
             Get an API key
           </a>
-          <span className="text-muted/20">|</span>
+          <span className="text-muted/30">|</span>
           <a
             href="https://github.com/Lexus2016/Agent-Debate-Consensus"
             target="_blank"
             rel="noopener noreferrer"
-            className="hover:text-muted transition-colors duration-150"
+            className="hover:text-foreground transition-colors duration-150"
           >
             GitHub
           </a>

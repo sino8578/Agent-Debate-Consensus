@@ -10,11 +10,11 @@
   --color-surface-light: #2c2c2e;
   --color-surface-hover: #3a3a3c;
   --color-surface-dark: #0c0c0c;
-  --color-muted: #98989d;
+  --color-muted: #aeaeb2;
   --color-border: #38383a;
   --color-accent: #0a84ff;
-  --color-separator: rgba(255, 255, 255, 0.06);
-  --color-elevated: rgba(255, 255, 255, 0.05);
+  --color-separator: rgba(255, 255, 255, 0.10);
+  --color-elevated: rgba(255, 255, 255, 0.08);
 }
 
 /* Light theme overrides */
@@ -28,11 +28,11 @@
   --color-surface-light: #e5e5ea;
   --color-surface-hover: #d1d1d6;
   --color-surface-dark: #f2f2f7;
-  --color-muted: #8e8e93;
+  --color-muted: #636366;
   --color-border: #c6c6c8;
   --color-accent: #007aff;
-  --color-separator: rgba(0, 0, 0, 0.08);
-  --color-elevated: rgba(0, 0, 0, 0.03);
+  --color-separator: rgba(0, 0, 0, 0.12);
+  --color-elevated: rgba(0, 0, 0, 0.06);
 }
 
 body {
@@ -54,35 +54,35 @@ body {
 /* Scrollbar — dark */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
 }
 
 ::-webkit-scrollbar { width: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.12);
   border-radius: 4px;
   border: 2px solid transparent;
   background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.22);
   border: 2px solid transparent;
   background-clip: content-box;
 }
 
 /* Scrollbar — light */
 [data-theme="light"] * {
-  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
+  scrollbar-color: rgba(0, 0, 0, 0.18) transparent;
 }
 
 [data-theme="light"] ::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.12);
+  background: rgba(0, 0, 0, 0.15);
   border: 2px solid transparent;
   background-clip: content-box;
 }
 [data-theme="light"] ::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.22);
+  background: rgba(0, 0, 0, 0.25);
   border: 2px solid transparent;
   background-clip: content-box;
 }

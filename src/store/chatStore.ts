@@ -13,6 +13,7 @@ export const useChatStore = create<ChatState>()(
       typingModels: [],
       contextWindowSize: 20,
       theme: "dark" as Theme,
+      fontSize: 15,
       publicMode: null,
       apiKey: null,
 
@@ -92,6 +93,8 @@ export const useChatStore = create<ChatState>()(
         set({ theme });
       },
 
+      setFontSize: (size) => set({ fontSize: size }),
+
       setPublicMode: (mode) => set({ publicMode: mode }),
 
       setApiKey: (key) => {
@@ -116,6 +119,7 @@ export const useChatStore = create<ChatState>()(
         activeModels: state.activeModels,
         contextWindowSize: state.contextWindowSize,
         theme: state.theme,
+        fontSize: state.fontSize,
       }),
     }
   )

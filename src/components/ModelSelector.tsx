@@ -15,12 +15,12 @@ export function ModelSelector() {
   return (
     <div>
       <div className="flex items-center justify-between px-2 mb-2">
-        <h3 className="text-[11px] font-medium text-muted uppercase tracking-[0.05em]">
+        <h3 className="text-[12px] font-medium text-muted uppercase tracking-[0.05em]">
           Agents
         </h3>
         <button
           onClick={() => setIsModalOpen(true)}
-          className="w-5 h-5 flex items-center justify-center rounded-md text-muted/60 hover:text-foreground hover:bg-elevated transition-colors duration-150 text-[14px] leading-none"
+          className="w-6 h-6 flex items-center justify-center rounded-md text-muted hover:text-foreground hover:bg-elevated transition-colors duration-150 text-[16px] leading-none"
           title="Discover more agents"
         >
           +
@@ -49,7 +49,7 @@ export function ModelSelector() {
                   style={{ backgroundColor: model.color }}
                 />
                 <div className="flex-1 min-w-0">
-                  <div className="text-[13px] font-normal truncate text-foreground/85 leading-tight">
+                  <div className="text-[14px] font-normal truncate text-foreground/90 leading-tight">
                     {model.name}
                   </div>
                 </div>
@@ -64,7 +64,7 @@ export function ModelSelector() {
                     e.stopPropagation();
                     removeModel(model.id);
                   }}
-                  className="absolute right-1 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-md text-[10px] text-muted hover:text-foreground hover:bg-elevated opacity-0 group-hover:opacity-100 transition-all duration-150"
+                  className="absolute right-1 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-md text-[11px] text-muted hover:text-foreground hover:bg-elevated opacity-0 group-hover:opacity-100 transition-all duration-150"
                   title="Remove"
                 >
                   ✕

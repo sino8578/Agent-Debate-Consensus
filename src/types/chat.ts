@@ -38,6 +38,7 @@ export interface ChatState {
   typingModels: TypingState[];
   contextWindowSize: number;
   theme: Theme;
+  fontSize: number;
   publicMode: boolean | null;
   apiKey: string | null;
 
@@ -50,6 +51,7 @@ export interface ChatState {
   removeModel: (modelId: string) => void;
   setContextWindowSize: (size: number) => void;
   setTheme: (theme: Theme) => void;
+  setFontSize: (size: number) => void;
   setPublicMode: (mode: boolean) => void;
   setApiKey: (key: string) => void;
   clearApiKey: () => void;
