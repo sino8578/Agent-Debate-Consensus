@@ -6,7 +6,11 @@ interface ResponseDecision {
   priority: number;
 }
 
-const MAX_AI_ROUNDS = 3; // Max AI-to-AI exchanges before pausing for user
+const MAX_PER_MODEL = 2; // Max responses per model between user messages
+
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 export class ConversationEngine {
   private cooldowns: Map<string, number> = new Map();
@@ -21,7 +25,7 @@ export class ConversationEngine {
   }
 
   /**
-   * Count consecutive AI messages since the last user message.
+   * Count ALL consecutive AI messages since the last user message.
    */
   private countAiRoundsSinceUser(messages: Message[]): number {
     let count = 0;
@@ -34,15 +38,38 @@ export class ConversationEngine {
     return count;
   }
 
+  /**
+   * Count how many times THIS specific model has responded since the last user message.
+   */
+  private countModelRoundsSinceUser(
+    messages: Message[],
+    modelId: string
+  ): number {
+    let count = 0;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === "user") break;
+      if (messages[i].modelId === modelId && !messages[i].isStreaming) {
+        count++;
+      }
+    }
+    return count;
+  }
+
   analyzeForResponse(
     model: Model,
     messages: Message[],
     latestMessage: Message,
     activeModels: Model[],
-    moderatorId?: string | null
+    moderatorId?: string | null,
+    failedModelIds?: Set<string>
   ): ResponseDecision {
     // Don't respond to own messages
     if (latestMessage.modelId === model.id) {
+      return { shouldRespond: false, delay: 0, priority: 0 };
+    }
+
+    // Skip failed models
+    if (failedModelIds?.has(model.id)) {
       return { shouldRespond: false, delay: 0, priority: 0 };
     }
 
@@ -51,8 +78,9 @@ export class ConversationEngine {
     let priority = 0;
     let shouldRespond = false;
 
-    // Highest priority: @mentioned - BYPASSES COOLDOWN and round limit
-    const mentionPattern = new RegExp(`@${model.shortName.toLowerCase()}\\b`, "i");
+    // Highest priority: @mentioned - BYPASSES COOLDOWN and per-model limit
+    const escaped = escapeRegex(model.shortName.toLowerCase());
+    const mentionPattern = new RegExp(`@${escaped}\\b`, "i");
     const isMentioned = mentionPattern.test(latestMessage.content);
 
     if (isMentioned) {
@@ -69,16 +97,27 @@ export class ConversationEngine {
     }
 
     const aiRounds = this.countAiRoundsSinceUser(messages);
+    const modelRounds = this.countModelRoundsSinceUser(messages, model.id);
 
-    // Moderator logic: respond after round limit to summarize
+    // Count active non-moderator, non-failed models
+    const nonModeratorCount = activeModels.filter(
+      (m) => m.id !== moderatorId && !failedModelIds?.has(m.id)
+    ).length;
+
+    // Per-model limit (unless @mentioned)
+    if (!isMentioned && modelRounds >= MAX_PER_MODEL) {
+      return { shouldRespond: false, delay: 0, priority: 0 };
+    }
+
+    // Moderator logic: respond after regular models have had their say
     if (isModerator && !isMentioned) {
-      // Moderator responds to user messages
+      // Moderator responds to user messages (goes last, lower priority)
       if (latestMessage.role === "user") {
         shouldRespond = true;
-        priority = 70; // Slightly lower than regular models so it goes after them
+        priority = 70;
       }
-      // Moderator summarizes after the round limit is reached
-      else if (aiRounds >= MAX_AI_ROUNDS) {
+      // Moderator summarizes after each non-moderator model has had a chance to speak
+      else if (aiRounds >= Math.max(nonModeratorCount, 2)) {
         shouldRespond = true;
         priority = 90; // High priority for summary
       }
@@ -88,13 +127,8 @@ export class ConversationEngine {
       }
 
       const readingTime = Math.min(latestMessage.content.length * 15, 2000);
-      const delay = 3000 + readingTime + Math.random() * 1500; // Longer delay — waits for others
+      const delay = 3000 + readingTime + Math.random() * 1500;
       return { shouldRespond, delay, priority };
-    }
-
-    // Regular model: check round limit
-    if (!isMentioned && latestMessage.role !== "user" && aiRounds >= MAX_AI_ROUNDS) {
-      return { shouldRespond: false, delay: 0, priority: 0 };
     }
 
     // High priority: User message — all active models respond
@@ -103,14 +137,14 @@ export class ConversationEngine {
       priority = 80;
     }
 
-    // Medium priority: Another AI asked a question
-    if (!shouldRespond && latestMessage.content.includes("?")) {
+    // Medium priority: Another AI's message ends with a question
+    if (!shouldRespond && /\?\s*$/.test(latestMessage.content.trim())) {
       shouldRespond = true;
       priority = 60;
     }
 
     // Low priority: Random chance (10%) for natural flow
-    if (!shouldRespond && Math.random() < 0.10) {
+    if (!shouldRespond && Math.random() < 0.1) {
       shouldRespond = true;
       priority = 20;
     }
@@ -237,14 +271,45 @@ export function buildContextWindow(
   model: Model
 ): { role: "user" | "assistant" | "system"; content: string }[] {
   const recentMessages = messages.slice(-windowSize);
+  const windowStartIdx = messages.length - windowSize;
 
-  return recentMessages.map((msg) => ({
-    role: msg.role as "user" | "assistant",
-    content:
-      msg.modelId && msg.modelId !== model.id
-        ? `[${msg.modelName}]: ${msg.content}`
-        : msg.content,
-  }));
+  // Find the last user message in the full history
+  let lastUserIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "user") {
+      lastUserIdx = i;
+      break;
+    }
+  }
+
+  const result: { role: "user" | "assistant"; content: string }[] = [];
+
+  // Pin the user's question if it was pushed out of the context window
+  if (lastUserIdx >= 0 && lastUserIdx < windowStartIdx) {
+    result.push({
+      role: "user",
+      content: messages[lastUserIdx].content,
+    });
+  }
+
+  for (const msg of recentMessages) {
+    if (msg.role === "user") {
+      // User messages stay as user role
+      result.push({ role: "user", content: msg.content });
+    } else if (msg.modelId === model.id) {
+      // Own previous messages -> assistant role (no prefix)
+      result.push({ role: "assistant", content: msg.content });
+    } else {
+      // Other AI models' messages -> user role with name prefix
+      // This helps the model distinguish external input from its own output
+      result.push({
+        role: "user",
+        content: `[${msg.modelName}]: ${msg.content}`,
+      });
+    }
+  }
+
+  return result;
 }
 
 export const conversationEngine = new ConversationEngine();

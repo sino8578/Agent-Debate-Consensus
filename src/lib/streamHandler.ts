@@ -55,7 +55,18 @@ export async function streamModelResponse(
     });
 
     if (!response.ok) {
-      throw new Error(`API error: ${response.status}`);
+      let errorMessage = `API error: ${response.status}`;
+      try {
+        const body = await response.json();
+        if (body.error) {
+          errorMessage = typeof body.error === "string"
+            ? body.error
+            : body.error.message || errorMessage;
+        }
+      } catch {
+        // Use default error message if body parsing fails
+      }
+      throw new Error(errorMessage);
     }
 
     const reader = response.body?.getReader();
@@ -90,16 +101,17 @@ export async function streamModelResponse(
             onComplete();
             return;
           }
+          let parsed;
           try {
-            const parsed = JSON.parse(data);
-            if (parsed.content || parsed.reasoning) {
-              onToken(parsed.content || "", parsed.reasoning || "");
-            }
-            if (parsed.error) {
-              throw new Error(parsed.error);
-            }
-          } catch (e) {
-            // Ignore parse errors for incomplete chunks
+            parsed = JSON.parse(data);
+          } catch {
+            continue; // Skip unparseable chunks
+          }
+          if (parsed.error) {
+            throw new Error(parsed.error);
+          }
+          if (parsed.content || parsed.reasoning) {
+            onToken(parsed.content || "", parsed.reasoning || "");
           }
         }
       }

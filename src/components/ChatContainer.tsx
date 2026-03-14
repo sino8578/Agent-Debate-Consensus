@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback, useState, useRef } from "react";
+import { useEffect, useCallback, useState } from "react";
 import { useChatStore } from "@/store/chatStore";
 import {
   conversationEngine,
@@ -97,6 +97,8 @@ function ChatApp() {
   const fontSize = useChatStore((state) => state.fontSize);
   const setFontSize = useChatStore((state) => state.setFontSize);
   const moderatorId = useChatStore((state) => state.moderatorId);
+  const markModelFailed = useChatStore((state) => state.markModelFailed);
+  const clearModelFailed = useChatStore((state) => state.clearModelFailed);
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const isGenerating = typingModels.length > 0 || messages.some((m) => m.isStreaming);
@@ -117,6 +119,12 @@ function ChatApp() {
       const state = useChatStore.getState();
       const model = state.activeModels.find((m) => m.id === modelId);
       if (!model) {
+        conversationEngine.completeResponse(modelId);
+        return;
+      }
+
+      // Skip if model has been marked as failed since queueing
+      if (state.failedModels[modelId]) {
         conversationEngine.completeResponse(modelId);
         return;
       }
@@ -164,6 +172,7 @@ function ChatApp() {
 
           completeMessage(messageId);
           conversationEngine.completeResponse(modelId);
+          clearModelFailed(modelId); // Success clears any previous failure
 
           const latestState = useChatStore.getState();
           const latestMessage = latestState.messages.find(
@@ -175,13 +184,13 @@ function ChatApp() {
         },
         onError: (error) => {
           console.error("Stream error:", error);
-          updateMessage(messageId, content || "[Error: Failed to get response]", reasoning);
-          completeMessage(messageId);
+          removeMessage(messageId); // Remove the empty/error bubble
           conversationEngine.completeResponse(modelId);
+          markModelFailed(modelId, error.message);
         },
       });
     },
-    [addMessage, updateMessage, completeMessage, removeMessage, setTyping, contextWindowSize]
+    [addMessage, updateMessage, completeMessage, removeMessage, setTyping, contextWindowSize, markModelFailed, clearModelFailed]
   );
 
   useEffect(() => {
@@ -191,14 +200,18 @@ function ChatApp() {
   const processModelResponses = useCallback(
     (latestMessage: Message) => {
       const state = useChatStore.getState();
+      const failedModelIds = new Set(Object.keys(state.failedModels));
 
       for (const model of state.activeModels) {
+        if (failedModelIds.has(model.id)) continue;
+
         const decision = conversationEngine.analyzeForResponse(
           model,
           state.messages,
           latestMessage,
           state.activeModels,
-          state.moderatorId
+          state.moderatorId,
+          failedModelIds
         );
 
         if (decision.shouldRespond) {

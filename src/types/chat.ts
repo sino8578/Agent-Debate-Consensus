@@ -42,6 +42,7 @@ export interface ChatState {
   moderatorId: string | null;
   publicMode: boolean | null;
   apiKey: string | null;
+  failedModels: Record<string, string>; // modelId -> error reason
 
   addMessage: (message: Omit<Message, "id" | "timestamp">) => string;
   updateMessage: (id: string, content: string, reasoning?: string) => void;
@@ -59,5 +60,7 @@ export interface ChatState {
   setApiKey: (key: string) => void;
   clearApiKey: () => void;
   clearChat: () => void;
+  markModelFailed: (modelId: string, reason: string) => void;
+  clearModelFailed: (modelId: string) => void;
   initializeModels: (models: Model[]) => void;
 }

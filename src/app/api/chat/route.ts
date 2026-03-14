@@ -53,9 +53,10 @@ export async function POST(req: NextRequest) {
           controller.enqueue(encoder.encode("data: [DONE]\n\n"));
           controller.close();
         } catch (error) {
+          const message = error instanceof Error ? error.message : "Stream error";
           controller.enqueue(
             encoder.encode(
-              `data: ${JSON.stringify({ error: "Stream error" })}\n\n`
+              `data: ${JSON.stringify({ error: message })}\n\n`
             )
           );
           controller.close();
@@ -72,8 +73,9 @@ export async function POST(req: NextRequest) {
     });
   } catch (error) {
     console.error("API Error:", error);
+    const message = error instanceof Error ? error.message : "Failed to process request";
     return new Response(
-      JSON.stringify({ error: "Failed to process request" }),
+      JSON.stringify({ error: message }),
       { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }

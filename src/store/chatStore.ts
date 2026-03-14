@@ -17,6 +17,7 @@ export const useChatStore = create<ChatState>()(
       moderatorId: null,
       publicMode: null,
       apiKey: null,
+      failedModels: {},
 
       addMessage: (message) => {
         const id = uuidv4();
@@ -69,10 +70,15 @@ export const useChatStore = create<ChatState>()(
           const isCurrentlyActive = state.activeModels.some(
             (m) => m.id === modelId
           );
+
+          // Clear failure when re-activating a model
+          const { [modelId]: _, ...cleanedFailed } = state.failedModels;
+
           return {
             activeModels: isCurrentlyActive
               ? state.activeModels.filter((m) => m.id !== modelId)
               : [...state.activeModels, { ...model, isActive: true }],
+            failedModels: isCurrentlyActive ? state.failedModels : cleanedFailed,
           };
         }),
 
@@ -115,7 +121,30 @@ export const useChatStore = create<ChatState>()(
         set({ apiKey: null });
       },
 
-      clearChat: () => set({ messages: [], typingModels: [] }),
+      clearChat: () => set({ messages: [], typingModels: [], failedModels: {} }),
+
+      markModelFailed: (modelId, reason) =>
+        set((state) => {
+          const newFailed = { ...state.failedModels, [modelId]: reason };
+
+          // If failed model is moderator, reassign to another active non-failed model
+          if (state.moderatorId === modelId) {
+            const candidates = state.activeModels.filter(
+              (m) => m.id !== modelId && !newFailed[m.id]
+            );
+            const newMod = candidates.length > 0
+              ? candidates[Math.floor(Math.random() * candidates.length)].id
+              : null;
+            return { failedModels: newFailed, moderatorId: newMod };
+          }
+          return { failedModels: newFailed };
+        }),
+
+      clearModelFailed: (modelId) =>
+        set((state) => {
+          const { [modelId]: _, ...rest } = state.failedModels;
+          return { failedModels: rest };
+        }),
 
       initializeModels: (models) => set({ availableModels: models }),
     }),
