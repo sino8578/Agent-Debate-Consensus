@@ -207,7 +207,9 @@ Your role as moderator:
 - You can address participants using @mentions (e.g., @${otherModels[0] || "User"})
 - The human user has ultimate authority — follow their direction if they intervene
 - Keep your moderator responses focused and structured
-- Do NOT take sides in the debate — remain neutral and analytical`;
+- Do NOT take sides in the debate — remain neutral and analytical
+
+CRITICAL LANGUAGE RULE: You MUST respond in the same language the user used in their message. If the user writes in Ukrainian, respond in Ukrainian. If in English, respond in English. Always match the user's language. This applies to all your responses without exception.`;
   }
 
   return `You are ${model.name}, participating in a structured debate with a human moderator${otherModels.length > 0 ? " and other AI models" : ""}.
@@ -224,7 +226,9 @@ Rules:
 - You can address others using @mentions (e.g., @${otherModels[0] || "User"})
 - If directly addressed with @${model.shortName}, you must respond
 - Keep responses focused and substantive (2-4 sentences usually, unless more detail is warranted)
-- If consensus has been reached or you have nothing new to add, say so briefly rather than repeating points`;
+- If consensus has been reached or you have nothing new to add, say so briefly rather than repeating points
+
+CRITICAL LANGUAGE RULE: You MUST respond in the same language the user used in their message. If the user writes in Ukrainian, respond in Ukrainian. If in English, respond in English. Always match the user's language. This applies to all your responses without exception.`;
 }
 
 export function buildContextWindow(

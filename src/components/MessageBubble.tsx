@@ -3,7 +3,11 @@
 import { Message } from "@/types/chat";
 import { useChatStore } from "@/store/chatStore";
 import { messageToMarkdown } from "@/lib/exportChat";
-import { useMemo, useState } from "react";
+import { useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+
+const COLLAPSE_THRESHOLD = 300; // pixels
 
 interface Props {
   message: Message;
@@ -16,46 +20,12 @@ export function MessageBubble({ message }: Props) {
   const moderatorId = useChatStore((state) => state.moderatorId);
   const [reasoningOpen, setReasoningOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
   const isUser = message.role === "user";
   const model = [...activeModels, ...availableModels].find(
     (m) => m.id === message.modelId
   );
-
-  const formattedContent = useMemo(() => {
-    const allModels = [...activeModels, ...availableModels];
-    const parts: (string | { text: string; color: string })[] = [];
-
-    const mentionRegex = /@(\w+)/g;
-    let lastIndex = 0;
-    let execResult: RegExpExecArray | null;
-
-    while ((execResult = mentionRegex.exec(message.content)) !== null) {
-      const match = execResult;
-      if (match.index > lastIndex) {
-        parts.push(message.content.slice(lastIndex, match.index));
-      }
-
-      const mentionedModel = allModels.find(
-        (m) => m.shortName.toLowerCase() === match[1].toLowerCase()
-      );
-
-      if (mentionedModel) {
-        parts.push({ text: match[0], color: mentionedModel.color });
-      } else if (match[1].toLowerCase() === "user") {
-        parts.push({ text: match[0], color: "#bf5af2" });
-      } else {
-        parts.push(match[0]);
-      }
-
-      lastIndex = match.index + match[0].length;
-    }
-
-    if (lastIndex < message.content.length) {
-      parts.push(message.content.slice(lastIndex));
-    }
-
-    return parts;
-  }, [message.content, activeModels, availableModels]);
 
   const handleCopy = async () => {
     const md = messageToMarkdown(message);
@@ -71,6 +41,10 @@ export function MessageBubble({ message }: Props) {
     return null;
   }
 
+  // Check if content is long enough to collapse (rough heuristic: >500 chars)
+  const isLongMessage = message.content.length > 600 && !message.isStreaming;
+
+  // User messages — plain text
   if (isUser) {
     return (
       <div className="flex justify-end mb-3 animate-fade-in group/msg">
@@ -95,15 +69,7 @@ export function MessageBubble({ message }: Props) {
           </div>
           <div className="bg-primary text-white rounded-[20px] rounded-br-md px-4 py-2.5">
             <div className="whitespace-pre-wrap leading-[1.6]" style={{ fontSize: `${fontSize}px` }}>
-              {formattedContent.map((part, i) =>
-                typeof part === "string" ? (
-                  <span key={i}>{part}</span>
-                ) : (
-                  <span key={i} className="font-semibold text-white/80">
-                    {part.text}
-                  </span>
-                )
-              )}
+              {message.content}
             </div>
           </div>
         </div>
@@ -111,6 +77,7 @@ export function MessageBubble({ message }: Props) {
     );
   }
 
+  // AI messages — full Markdown rendering with collapse
   return (
     <div className="flex justify-start mb-3 animate-fade-in group/msg">
       <div className="flex gap-2.5 max-w-[78%]">
@@ -174,21 +141,81 @@ export function MessageBubble({ message }: Props) {
             </div>
           )}
 
-          <div className="bg-surface-light rounded-[20px] rounded-tl-md px-4 py-2.5 border border-separator">
-            <div className="whitespace-pre-wrap leading-[1.6] text-foreground" style={{ fontSize: `${fontSize}px` }}>
-              {formattedContent.map((part, i) =>
-                typeof part === "string" ? (
-                  <span key={i}>{part}</span>
-                ) : (
-                  <span key={i} style={{ color: part.color }} className="font-semibold">
-                    {part.text}
-                  </span>
-                )
-              )}
+          <div
+            className={`bg-surface-light rounded-[20px] rounded-tl-md px-4 py-2.5 border border-separator relative ${
+              isLongMessage ? "cursor-pointer" : ""
+            }`}
+            onClick={() => { if (isLongMessage) setExpanded(!expanded); }}
+          >
+            <div
+              ref={contentRef}
+              className={`markdown-body leading-[1.6] text-foreground transition-all duration-200 ${
+                isLongMessage && !expanded ? "overflow-hidden" : ""
+              }`}
+              style={{
+                fontSize: `${fontSize}px`,
+                maxHeight: isLongMessage && !expanded ? `${COLLAPSE_THRESHOLD}px` : undefined,
+              }}
+            >
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                  strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                  em: ({ children }) => <em className="italic">{children}</em>,
+                  h1: ({ children }) => <h1 className="text-[1.3em] font-bold mb-2 mt-3 first:mt-0">{children}</h1>,
+                  h2: ({ children }) => <h2 className="text-[1.15em] font-bold mb-1.5 mt-2.5 first:mt-0">{children}</h2>,
+                  h3: ({ children }) => <h3 className="text-[1.05em] font-semibold mb-1 mt-2 first:mt-0">{children}</h3>,
+                  ul: ({ children }) => <ul className="list-disc pl-5 mb-2 space-y-0.5">{children}</ul>,
+                  ol: ({ children }) => <ol className="list-decimal pl-5 mb-2 space-y-0.5">{children}</ol>,
+                  li: ({ children }) => <li className="leading-[1.5]">{children}</li>,
+                  blockquote: ({ children }) => (
+                    <blockquote className="border-l-2 border-primary/40 pl-3 my-2 text-foreground/70 italic">
+                      {children}
+                    </blockquote>
+                  ),
+                  code: ({ className, children }) => {
+                    const isBlock = className?.includes("language-");
+                    if (isBlock) {
+                      return (
+                        <code className="block bg-background rounded-lg px-3 py-2 my-2 text-[0.88em] font-mono overflow-x-auto whitespace-pre">
+                          {children}
+                        </code>
+                      );
+                    }
+                    return (
+                      <code className="bg-elevated px-1.5 py-0.5 rounded text-[0.88em] font-mono">
+                        {children}
+                      </code>
+                    );
+                  },
+                  pre: ({ children }) => <pre className="my-1">{children}</pre>,
+                  a: ({ href, children }) => (
+                    <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent underline underline-offset-2 hover:text-accent/80" onClick={(e) => e.stopPropagation()}>
+                      {children}
+                    </a>
+                  ),
+                  hr: () => <hr className="border-separator my-3" />,
+                  table: ({ children }) => (
+                    <div className="overflow-x-auto my-2">
+                      <table className="min-w-full text-[0.9em]">{children}</table>
+                    </div>
+                  ),
+                  th: ({ children }) => <th className="border border-separator px-2 py-1 font-semibold text-left bg-elevated">{children}</th>,
+                  td: ({ children }) => <td className="border border-separator px-2 py-1">{children}</td>,
+                }}
+              >
+                {message.content}
+              </ReactMarkdown>
               {message.isStreaming && (
                 <span className="inline-block w-[2px] h-[1.1em] bg-foreground/50 animate-blink ml-0.5 align-text-bottom" />
               )}
             </div>
+
+            {/* Gradient fade when collapsed */}
+            {isLongMessage && !expanded && (
+              <div className="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-surface-light to-transparent rounded-b-[20px] pointer-events-none" />
+            )}
           </div>
         </div>
       </div>
