@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useChatStore } from "@/store/chatStore";
 import { MessageBubble } from "./MessageBubble";
 import { TypingIndicator } from "./TypingIndicator";
@@ -9,13 +9,42 @@ export function MessageList() {
   const messages = useChatStore((state) => state.messages);
   const typingModels = useChatStore((state) => state.typingModels);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const [isAtBottom, setIsAtBottom] = useState(true);
 
-  useEffect(() => {
+  const checkIfAtBottom = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return true;
+    // Consider "at bottom" if within 80px of the end
+    return el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  }, []);
+
+  const scrollToBottom = useCallback(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, typingModels]);
+  }, []);
+
+  // Track scroll position
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+
+    const handleScroll = () => {
+      setIsAtBottom(checkIfAtBottom());
+    };
+
+    el.addEventListener("scroll", handleScroll, { passive: true });
+    return () => el.removeEventListener("scroll", handleScroll);
+  }, [checkIfAtBottom]);
+
+  // Auto-scroll only when user is at bottom
+  useEffect(() => {
+    if (isAtBottom) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages, typingModels, isAtBottom]);
 
   return (
-    <div className="flex-1 overflow-y-auto px-5 py-5">
+    <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-5 py-5 relative">
       {messages.length === 0 ? (
         <div className="h-full flex items-center justify-center animate-fade-in">
           <div className="text-center max-w-[300px]">
@@ -39,6 +68,22 @@ export function MessageList() {
       )}
       <TypingIndicator />
       <div ref={bottomRef} />
+
+      {/* Scroll to bottom button */}
+      {!isAtBottom && messages.length > 0 && (
+        <button
+          onClick={() => {
+            scrollToBottom();
+            setIsAtBottom(true);
+          }}
+          className="sticky bottom-4 left-1/2 -translate-x-1/2 float-right mr-4 w-9 h-9 flex items-center justify-center rounded-full bg-surface border border-separator shadow-lg shadow-black/20 text-muted hover:text-foreground hover:bg-surface-light transition-all duration-150 animate-fade-in"
+          title="Scroll to bottom"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+          </svg>
+        </button>
+      )}
     </div>
   );
 }
