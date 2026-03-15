@@ -1,16 +1,18 @@
 /**
  * Token estimation and context budget management.
  *
- * Uses a simple heuristic (~4 chars per token for English, ~2 for CJK/Cyrillic)
- * which is accurate within ~10-15% for most models. Good enough for budgeting
- * without pulling in a 2MB tokenizer library.
+ * Uses a simple heuristic (~3 chars per token) which is conservative enough
+ * to handle mixed Latin/Cyrillic text. Accurate within ~15-20% for most models.
+ * Good enough for budgeting without pulling in a 2MB tokenizer library.
  */
 
-// Average chars-per-token ratio. English prose ≈ 4, code ≈ 3.5, CJK ≈ 1.5.
-// We use a conservative 3.5 to slightly overestimate token count (safer for budgeting).
-const CHARS_PER_TOKEN = 3.5;
+// Average chars-per-token ratio.
+// English prose ≈ 4, code ≈ 3.5, Cyrillic ≈ 2-2.5, CJK ≈ 1.5.
+// We use a conservative 3.0 to avoid underestimating for Cyrillic/CJK text
+// (this app supports Ukrainian debates).
+const CHARS_PER_TOKEN = 3.0;
 
-/** Estimate token count for a string. Conservative (overestimates slightly). */
+/** Estimate token count for a string. Conservative (overestimates for Latin). */
 export function estimateTokens(text: string): number {
   if (!text) return 0;
   return Math.ceil(text.length / CHARS_PER_TOKEN);
@@ -18,7 +20,7 @@ export function estimateTokens(text: string): number {
 
 /**
  * Known context window sizes for popular models (in tokens).
- * Falls back to a conservative default for unknown models.
+ * Used as fallback when model.context_length is not available.
  */
 const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   // OpenAI
@@ -50,9 +52,13 @@ const MODEL_CONTEXT_LIMITS: Record<string, number> = {
 
 const DEFAULT_CONTEXT_LIMIT = 64_000; // Conservative fallback
 
-/** Get model's context window limit in tokens. */
-export function getModelContextLimit(modelId: string): number {
-  return MODEL_CONTEXT_LIMITS[modelId] ?? DEFAULT_CONTEXT_LIMIT;
+/**
+ * Get model's context window limit in tokens.
+ * Prefers the dynamic context_length from OpenRouter API (stored on Model object),
+ * falls back to hardcoded map, then to conservative default.
+ */
+export function getModelContextLimit(modelId: string, contextLength?: number): number {
+  return contextLength ?? MODEL_CONTEXT_LIMITS[modelId] ?? DEFAULT_CONTEXT_LIMIT;
 }
 
 /**
@@ -69,13 +75,14 @@ export const MAX_COMPLETION_TOKENS = 4096;
  *
  * @param modelId - The model being called
  * @param hardCap - Optional hard cap on total tokens (e.g., from account budget)
+ * @param contextLength - Optional dynamic context_length from the Model object
  * @returns Available tokens for system prompt + conversation messages
  */
-export function getPromptBudget(modelId: string, hardCap?: number): number {
-  const contextLimit = getModelContextLimit(modelId);
+export function getPromptBudget(modelId: string, hardCap?: number, contextLength?: number): number {
+  const contextLimit = getModelContextLimit(modelId, contextLength);
   const effectiveLimit = hardCap ? Math.min(contextLimit, hardCap) : contextLimit;
 
-  // Reserve tokens for completion + safety margin (10%)
+  // Reserve tokens for completion + safety margin (5%)
   const safetyMargin = Math.ceil(effectiveLimit * 0.05);
   return effectiveLimit - MAX_COMPLETION_TOKENS - safetyMargin;
 }
@@ -106,9 +113,9 @@ export function truncateToTokenBudget(text: string, maxTokens: number): string {
  * Used for older messages that need to be summarized to save tokens.
  *
  * Strategy:
- * - Very short messages (< 100 tokens): keep as-is
- * - Medium messages (100-300 tokens): light truncation
- * - Long messages (300+ tokens): aggressive truncation to ~150 tokens
+ * - Very short messages (< 80 tokens): keep as-is
+ * - Medium messages (80-250 tokens): light truncation to ~200 tokens
+ * - Long messages (250+ tokens): aggressive truncation to ~150 tokens
  */
 export function compressMessage(content: string, isRecent: boolean): string {
   const tokens = estimateTokens(content);

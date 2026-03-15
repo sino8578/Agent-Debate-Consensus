@@ -189,11 +189,20 @@ export async function POST(req: NextRequest) {
 
     const effectiveModel = webSearch ? `${model}:online` : model;
 
+    // Cap completion tokens to prevent "can't afford" errors.
+    // Debate responses rarely exceed 1000 tokens; 4096 is a generous ceiling.
+    // Hard server-side cap of 8192 prevents client from requesting excessive tokens.
+    const rawMax = typeof body.max_tokens === "number" && body.max_tokens > 0
+      ? body.max_tokens
+      : 4096;
+    const maxTokens = Math.min(rawMax, 8192);
+
     const stream = await openai.chat.completions.create({
       model: effectiveModel,
       messages,
       stream: true,
       temperature: temp,
+      max_tokens: maxTokens,
     });
 
     const encoder = new TextEncoder();

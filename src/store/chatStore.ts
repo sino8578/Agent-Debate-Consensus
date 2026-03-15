@@ -22,6 +22,7 @@ export const useChatStore = create<ChatState>()(
       apiKey: null,
       failedModels: {},
       maxActiveModels: 8,
+      contextSummary: null,
       temperature: "balanced" as TemperaturePreset,
       sessions: [],
       currentSessionId: null,
@@ -164,7 +165,9 @@ export const useChatStore = create<ChatState>()(
         set({ apiKey: null });
       },
 
-      clearChat: () => set({ messages: [], typingModels: [], failedModels: {} }),
+      setContextSummary: (summary) => set({ contextSummary: summary }),
+
+      clearChat: () => set({ messages: [], typingModels: [], failedModels: {}, contextSummary: null }),
 
       setMaxActiveModels: (limit) => set({ maxActiveModels: limit }),
 
@@ -232,6 +235,7 @@ export const useChatStore = create<ChatState>()(
                     activeModelIds,
                     moderatorId: state.moderatorId,
                     temperature: state.temperature,
+                    contextSummary: state.contextSummary,
                     updatedAt: now,
                   }
                 : s
@@ -246,6 +250,7 @@ export const useChatStore = create<ChatState>()(
               activeModelIds,
               moderatorId: state.moderatorId,
               temperature: state.temperature,
+              contextSummary: state.contextSummary,
               createdAt: now,
               updatedAt: now,
             };
@@ -273,6 +278,7 @@ export const useChatStore = create<ChatState>()(
                       activeModelIds,
                       moderatorId: state.moderatorId,
                       temperature: state.temperature,
+                      contextSummary: state.contextSummary,
                       updatedAt: now,
                     }
                   : s
@@ -286,6 +292,7 @@ export const useChatStore = create<ChatState>()(
                 activeModelIds,
                 moderatorId: state.moderatorId,
                 temperature: state.temperature,
+                contextSummary: state.contextSummary,
                 createdAt: now,
                 updatedAt: now,
               };
@@ -306,6 +313,7 @@ export const useChatStore = create<ChatState>()(
             activeModels: restoredActiveModels,
             moderatorId: session.moderatorId,
             temperature: session.temperature,
+            contextSummary: session.contextSummary ?? null,
             currentSessionId: id,
             typingModels: [],
             failedModels: {},
@@ -337,6 +345,7 @@ export const useChatStore = create<ChatState>()(
                       activeModelIds,
                       moderatorId: state.moderatorId,
                       temperature: state.temperature,
+                      contextSummary: state.contextSummary,
                       updatedAt: now,
                     }
                   : s
@@ -350,6 +359,7 @@ export const useChatStore = create<ChatState>()(
                 activeModelIds,
                 moderatorId: state.moderatorId,
                 temperature: state.temperature,
+                contextSummary: state.contextSummary,
                 createdAt: now,
                 updatedAt: now,
               };
@@ -361,6 +371,7 @@ export const useChatStore = create<ChatState>()(
             messages: [],
             typingModels: [],
             failedModels: {},
+            contextSummary: null,
             currentSessionId: uuidv4(),
           };
         }),
@@ -378,6 +389,7 @@ export const useChatStore = create<ChatState>()(
         sessions: state.sessions,
         temperature: state.temperature,
         webSearchEnabled: state.webSearchEnabled,
+        contextSummary: state.contextSummary,
       }),
       onRehydrateStorage: () => (state) => {
         // Clean up stale streaming state that persisted from a page close mid-stream

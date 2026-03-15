@@ -1,16 +1,21 @@
 "use client";
 
-import { useEffect, useCallback, useState } from "react";
+import { useEffect, useCallback, useState, useRef } from "react";
 import { useChatStore } from "@/store/chatStore";
 import {
   conversationEngine,
   buildSystemPrompt,
   buildSummaryPrompt,
   buildContextWindow,
+  buildSummarizationSystemPrompt,
+  buildSummarizationInput,
+  shouldSummarize,
+  getSummarizationSplit,
   MAX_MODERATOR_ROUNDS,
   MAX_RETRIES,
 } from "@/lib/conversationEngine";
 import { streamModelResponse, stopAllStreams } from "@/lib/streamHandler";
+import { MAX_COMPLETION_TOKENS } from "@/lib/tokenBudget";
 import { messagesToMarkdown, downloadMarkdown } from "@/lib/exportChat";
 import { MessageList } from "./MessageList";
 import { ChatInput } from "./ChatInput";
@@ -120,6 +125,8 @@ function ChatApp() {
   const fontSize = useChatStore((state) => state.fontSize);
   const setFontSize = useChatStore((state) => state.setFontSize);
   const moderatorId = useChatStore((state) => state.moderatorId);
+  const contextSummary = useChatStore((state) => state.contextSummary);
+  const setContextSummary = useChatStore((state) => state.setContextSummary);
   const markModelFailed = useChatStore((state) => state.markModelFailed);
   const clearModelFailed = useChatStore((state) => state.clearModelFailed);
   const temperature = useChatStore((state) => state.temperature);
@@ -137,6 +144,7 @@ function ChatApp() {
   const [keyPromptOpen, setKeyPromptOpen] = useState(false);
 
   const isGenerating = typingModels.length > 0 || messages.some((m) => m.isStreaming);
+  const summarizationAbort = useRef<AbortController | null>(null);
 
   // Auto-close sidebar when window resizes below mobile breakpoint
   useEffect(() => {
@@ -151,11 +159,13 @@ function ChatApp() {
 
   const handleStop = useCallback(() => {
     // 1. Mark round complete FIRST — blocks all downstream activity
-    //    (analyzeForResponse, queueResponse, completeResponse queue processing,
-    //    processModelResponses, and stale setTimeout callbacks via epoch check)
     conversationEngine.markRoundComplete();
-    // 2. Abort all active HTTP streams
+    // 2. Abort all active HTTP streams + any in-flight summarization
     stopAllStreams();
+    if (summarizationAbort.current) {
+      summarizationAbort.current.abort();
+      summarizationAbort.current = null;
+    }
     // 3. Clean up UI state
     const currentState = useChatStore.getState();
     currentState.typingModels.forEach((t) => setTyping(t.modelId, t.modelName, false));
@@ -165,6 +175,112 @@ function ChatApp() {
       }
     });
   }, [setTyping, completeMessage]);
+
+  // ── Progressive summarization: fire-and-forget after round completes ──
+  const triggerSummarization = useCallback(async () => {
+    const state = useChatStore.getState();
+
+    // Don't spend server credits on summarization in public mode without user's own key
+    if (state.appMode === "public" && !state.apiKey) return;
+
+    if (!shouldSummarize(state.messages, state.contextSummary)) return;
+
+    // Pick model for summarization: moderator > random active model
+    const failedIds = new Set(Object.keys(state.failedModels));
+    const candidates = state.activeModels.filter((m) => !failedIds.has(m.id));
+    if (candidates.length === 0) return;
+
+    const summarizerModel = state.moderatorId
+      ? candidates.find((m) => m.id === state.moderatorId) ?? candidates[0]
+      : candidates[0];
+
+    // Determine which messages to summarize
+    const { toSummarize, recentStartIdx } = getSummarizationSplit(state.messages);
+    if (toSummarize.length === 0) return;
+
+    // Use the last non-system message in the summarized range as throughMessageId
+    const lastSummarized = toSummarize[toSummarize.length - 1];
+    if (!lastSummarized) return;
+
+    // Build input
+    const input = buildSummarizationInput(
+      toSummarize,
+      state.contextSummary?.content
+    );
+    const systemPrompt = buildSummarizationSystemPrompt();
+
+    const apiMessages = [
+      { role: "system" as const, content: systemPrompt },
+      { role: "user" as const, content: input },
+    ];
+
+    // Abort any previous in-flight summarization
+    if (summarizationAbort.current) {
+      summarizationAbort.current.abort();
+    }
+    const controller = new AbortController();
+    summarizationAbort.current = controller;
+
+    try {
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(typeof window !== "undefined" && sessionStorage.getItem("openrouter-api-key")
+            ? { "x-api-key": sessionStorage.getItem("openrouter-api-key")! }
+            : {}),
+        },
+        body: JSON.stringify({
+          model: summarizerModel.id,
+          messages: apiMessages,
+          temperature: 0.3,
+          max_tokens: 2048,
+        }),
+        signal: controller.signal,
+      });
+
+      if (!response.ok || !response.body) return;
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let summaryContent = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split("\n");
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const data = line.slice(6).trim();
+          if (data === "[DONE]") break;
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.content) summaryContent += parsed.content;
+          } catch {
+            // Skip malformed chunks
+          }
+        }
+      }
+
+      // Only save if we got meaningful content and weren't aborted
+      if (summaryContent.length > 50 && !controller.signal.aborted) {
+        setContextSummary({
+          content: summaryContent,
+          throughMessageId: lastSummarized.id,
+          messageCount: toSummarize.length,
+        });
+      }
+    } catch {
+      // Aborted or network error — silently fail, truncation fallback is fine
+    } finally {
+      if (summarizationAbort.current === controller) {
+        summarizationAbort.current = null;
+      }
+    }
+  }, [setContextSummary]);
 
   // Check if discussion settled (no pending work) and trigger moderator/summarizer.
   // Used after empty responses or failed retries to keep the debate flowing.
@@ -204,7 +320,8 @@ function ChatApp() {
       const contextMessages = buildContextWindow(
         state.messages,
         contextWindowSize,
-        model
+        model,
+        state.contextSummary
       );
 
       const apiMessages = [
@@ -212,7 +329,11 @@ function ChatApp() {
         ...contextMessages,
       ];
 
-      const streamOptions = { temperature: TEMP_MAP[state.temperature], webSearch: state.webSearchEnabled };
+      const streamOptions = {
+        temperature: TEMP_MAP[state.temperature],
+        webSearch: state.webSearchEnabled,
+        maxTokens: MAX_COMPLETION_TOKENS,
+      };
 
       const messageId = addMessage({
         role: "assistant",
@@ -284,6 +405,7 @@ function ChatApp() {
       // Summarizer (random model when no moderator) → round over
       if (isSum) {
         conversationEngine.markRoundComplete();
+        triggerSummarization();
         return;
       }
 
@@ -297,6 +419,7 @@ function ChatApp() {
         // the debate, even if it attributes arguments with @ModelName.
         if (priority <= 50) {
           conversationEngine.markRoundComplete();
+          triggerSummarization();
           return;
         }
         // Opening or discussion response — check for @mentions for further discussion
@@ -306,6 +429,7 @@ function ChatApp() {
         // If no models were queued → moderator concluded, round over
         if (!conversationEngine.hasPendingWork) {
           conversationEngine.markRoundComplete();
+          triggerSummarization();
         }
         return;
       }
@@ -365,6 +489,7 @@ function ChatApp() {
           } else {
             // Moderator exhausted its interventions — force round complete
             conversationEngine.markRoundComplete();
+            triggerSummarization();
           }
         } else {
           // No AI moderator — pick random active model to give a brief summary
@@ -377,6 +502,7 @@ function ChatApp() {
             conversationEngine.queueResponse(summarizer.id, 2000, 50);
           } else {
             conversationEngine.markRoundComplete();
+            triggerSummarization();
           }
         }
       }
@@ -387,6 +513,12 @@ function ChatApp() {
   const handleSendMessage = useCallback(
     (content: string, attachment?: FileAttachment) => {
       if (activeModels.length === 0) return;
+
+      // Abort any in-flight summarization — new round invalidates it
+      if (summarizationAbort.current) {
+        summarizationAbort.current.abort();
+        summarizationAbort.current = null;
+      }
 
       // New user message starts a fresh round
       conversationEngine.startNewRound();

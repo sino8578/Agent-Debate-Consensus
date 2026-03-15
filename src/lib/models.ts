@@ -16,6 +16,7 @@ export const availableModels: Model[] = [
     color: modelColors[0],
     isActive: false,
     pricing: { prompt: "0", completion: "0" },
+    context_length: 131_072,
   },
   {
     id: "meta-llama/llama-3.3-70b-instruct:free",
@@ -25,6 +26,7 @@ export const availableModels: Model[] = [
     color: modelColors[1],
     isActive: false,
     pricing: { prompt: "0", completion: "0" },
+    context_length: 131_072,
   },
   {
     id: "mistralai/mistral-small-3.1-24b-instruct:free",
@@ -34,6 +36,7 @@ export const availableModels: Model[] = [
     color: modelColors[2],
     isActive: false,
     pricing: { prompt: "0", completion: "0" },
+    context_length: 96_000,
   },
   {
     id: "google/gemma-3-27b-it:free",
@@ -43,5 +46,6 @@ export const availableModels: Model[] = [
     color: modelColors[3],
     isActive: false,
     pricing: { prompt: "0", completion: "0" },
+    context_length: 96_000,
   },
 ];

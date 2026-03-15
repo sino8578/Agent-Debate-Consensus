@@ -36,7 +36,7 @@ export async function streamModelResponse(
   modelId: string,
   messages: { role: string; content: string }[],
   callbacks: StreamCallbacks,
-  options?: { temperature?: number; webSearch?: boolean }
+  options?: { temperature?: number; webSearch?: boolean; maxTokens?: number }
 ): Promise<void> {
   const { onToken, onComplete, onError } = callbacks;
 
@@ -51,7 +51,7 @@ export async function streamModelResponse(
         "Content-Type": "application/json",
         ...getApiKeyHeader(),
       },
-      body: JSON.stringify({ model: modelId, messages, temperature: options?.temperature, webSearch: options?.webSearch }),
+      body: JSON.stringify({ model: modelId, messages, temperature: options?.temperature, webSearch: options?.webSearch, max_tokens: options?.maxTokens }),
       signal: controller.signal,
     });
 

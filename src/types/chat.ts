@@ -38,6 +38,12 @@ export interface TypingState {
   modelName: string;
 }
 
+export interface ContextSummary {
+  content: string;
+  throughMessageId: string;
+  messageCount: number;
+}
+
 export type Theme = "light" | "dark";
 
 export type AppMode = "private" | "public";
@@ -51,6 +57,7 @@ export interface DebateSession {
   activeModelIds: string[];
   moderatorId: string | null;
   temperature: TemperaturePreset;
+  contextSummary: ContextSummary | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -71,6 +78,7 @@ export interface ChatState {
   apiKey: string | null;
   failedModels: Record<string, string>; // modelId -> error reason
   maxActiveModels: number;
+  contextSummary: ContextSummary | null;
 
   addMessage: (message: Omit<Message, "id" | "timestamp">) => string;
   updateMessage: (id: string, content: string, reasoning?: string) => void;
@@ -89,6 +97,7 @@ export interface ChatState {
   setFreeModelIds: (ids: string[]) => void;
   setApiKey: (key: string) => void;
   clearApiKey: () => void;
+  setContextSummary: (summary: ContextSummary | null) => void;
   clearChat: () => void;
   setMaxActiveModels: (limit: number) => void;
   markModelFailed: (modelId: string, reason: string) => void;

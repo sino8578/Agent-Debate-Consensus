@@ -1,8 +1,9 @@
-import { Model, Message, FileAttachment } from "@/types/chat";
+import { Model, Message, FileAttachment, ContextSummary } from "@/types/chat";
 import {
   estimateTokens,
   compressMessage,
   getPromptBudget,
+  truncateToTokenBudget,
 } from "./tokenBudget";
 
 interface ResponseDecision {
@@ -544,58 +545,276 @@ function formatUserContent(
   return text ? `${text}\n\n${fileBlock}` : fileBlock;
 }
 
+/**
+ * Build context window using token budgeting instead of fixed message count.
+ *
+ * Strategy:
+ * 1. Always include the last user message (pinned).
+ * 2. Walk backwards from most recent messages, adding them to the context.
+ * 3. Recent messages (last 6) are kept in full; older ones are compressed.
+ * 4. Stop when we hit the token budget (derived from model context limit).
+ * 5. Respect windowSize as a maximum message count safeguard.
+ *
+ * This prevents the "context grows with N models" problem because each message's
+ * token cost is tracked, and old messages are compressed or dropped.
+ */
 export function buildContextWindow(
   messages: Message[],
   windowSize: number,
-  model: Model
+  model: Model,
+  contextSummary?: ContextSummary | null
 ): { role: "user" | "assistant"; content: string }[] {
-  const recentMessages = messages.slice(-windowSize);
-  const windowStartIdx = messages.length - windowSize;
+  // Calculate token budget for prompt (excludes system prompt — caller adds that separately)
+  // Reserve ~1000 tokens for the system prompt (moderator prompts with many models can reach 600+)
+  const systemPromptReserve = 1000;
+  const totalBudget = getPromptBudget(model.id, undefined, model.context_length) - systemPromptReserve;
+  const tokenBudget = Math.max(totalBudget, 2000); // floor at 2000 tokens
 
-  // Find the last user message in the full history
+  // Filter out system messages upfront
+  const chatMessages = messages.filter((m) => m.role !== "system");
+  if (chatMessages.length === 0) return [];
+
+  // ── If we have an LLM-generated summary, use it instead of old messages ──
+  if (contextSummary?.content && contextSummary.throughMessageId) {
+    const summaryIdx = messages.findIndex(
+      (m) => m.id === contextSummary.throughMessageId
+    );
+
+    if (summaryIdx !== -1) {
+      const result: { role: "user" | "assistant"; content: string }[] = [];
+      let usedTokens = 0;
+
+      // Prepend summary as context
+      const summaryText = `[Summary of earlier discussion]:\n${contextSummary.content}`;
+      const summaryTokens = estimateTokens(summaryText);
+      result.push({ role: "user", content: summaryText });
+      usedTokens += summaryTokens;
+
+      // Add messages AFTER the summary cutoff point
+      const recentMessages = messages
+        .slice(summaryIdx + 1)
+        .filter((m) => m.role !== "system");
+
+      for (const msg of recentMessages) {
+        let formatted: { role: "user" | "assistant"; content: string };
+        if (msg.role === "user") {
+          const raw = formatUserContent(msg.content, msg.attachment);
+          formatted = { role: "user", content: compressMessage(raw, true) };
+        } else if (msg.modelId === model.id) {
+          formatted = { role: "assistant", content: compressMessage(msg.content, true) };
+        } else {
+          const prefixed = `[${msg.modelName}]: ${msg.content}`;
+          formatted = { role: "user", content: compressMessage(prefixed, true) };
+        }
+
+        const tokens = estimateTokens(formatted.content);
+        if (usedTokens + tokens > tokenBudget && result.length > 1) {
+          break;
+        }
+        result.push(formatted);
+        usedTokens += tokens;
+      }
+
+      return result;
+    }
+    // If summarized message was deleted, fall through to standard logic
+  }
+
+  // ── Standard context window (no summary available) ──
+
+  // Find the last user message — always pin it
   let lastUserIdx = -1;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === "user") {
+  for (let i = chatMessages.length - 1; i >= 0; i--) {
+    if (chatMessages[i].role === "user") {
       lastUserIdx = i;
       break;
     }
   }
 
-  const result: { role: "user" | "assistant"; content: string }[] = [];
+  // How many "recent" messages get full treatment (no compression)
+  const RECENT_COUNT = 6;
 
-  // Pin the user's question if it was pushed out of the context window
-  if (lastUserIdx >= 0 && lastUserIdx < windowStartIdx) {
-    const pinnedMsg = messages[lastUserIdx];
-    result.push({
-      role: "user",
-      content: formatUserContent(pinnedMsg.content, pinnedMsg.attachment),
-    });
-  }
+  // Build candidate messages from newest to oldest, respecting windowSize cap
+  const candidates = chatMessages.slice(-Math.min(windowSize, chatMessages.length));
+  const recentThreshold = candidates.length - RECENT_COUNT;
 
-  for (const msg of recentMessages) {
-    // Skip system event notifications — not relevant for AI context
-    if (msg.role === "system") continue;
-
+  // Format a message for API consumption
+  const formatMsg = (
+    msg: Message,
+    isRecent: boolean
+  ): { role: "user" | "assistant"; content: string } => {
     if (msg.role === "user") {
-      // User messages stay as user role, with attachment if present
-      result.push({
-        role: "user",
-        content: formatUserContent(msg.content, msg.attachment),
-      });
+      const raw = formatUserContent(msg.content, msg.attachment);
+      const content = compressMessage(raw, isRecent);
+      return { role: "user", content };
     } else if (msg.modelId === model.id) {
-      // Own previous messages -> assistant role (no prefix)
-      result.push({ role: "assistant", content: msg.content });
+      return { role: "assistant", content: compressMessage(msg.content, isRecent) };
     } else {
-      // Other AI models' messages -> user role with name prefix
-      // This helps the model distinguish external input from its own output
-      result.push({
-        role: "user",
-        content: `[${msg.modelName}]: ${msg.content}`,
-      });
+      const prefixed = `[${msg.modelName}]: ${msg.content}`;
+      return { role: "user", content: compressMessage(prefixed, isRecent) };
+    }
+  };
+
+  // Phase 1: Always include pinned user message if it would be outside the window
+  let usedTokens = 0;
+  let pinnedFormatted: { role: "user" | "assistant"; content: string } | null = null;
+
+  if (lastUserIdx >= 0) {
+    const globalIdx = chatMessages.length - candidates.length;
+    if (lastUserIdx < globalIdx) {
+      // Last user message is outside our candidate window — pin it
+      const msg = chatMessages[lastUserIdx];
+      pinnedFormatted = formatMsg(msg, false);
+      usedTokens += estimateTokens(pinnedFormatted.content);
     }
   }
 
+  // Phase 2: Walk candidates from newest to oldest, fit within budget
+  const contextEntries: { role: "user" | "assistant"; content: string }[] = [];
+
+  for (let i = candidates.length - 1; i >= 0; i--) {
+    const msg = candidates[i];
+    const isRecent = i >= recentThreshold;
+    const formatted = formatMsg(msg, isRecent);
+    const tokens = estimateTokens(formatted.content);
+
+    // Always include the newest message even if it exceeds budget,
+    // so the model always has at least some conversation context.
+    const isNewest = i === candidates.length - 1;
+    if (!isNewest && usedTokens + tokens > tokenBudget) {
+      // Budget exceeded — stop adding older messages
+      break;
+    }
+
+    contextEntries.unshift(formatted);
+    usedTokens += tokens;
+  }
+
+  // Phase 3: Prepend pinned user message if needed
+  const result: { role: "user" | "assistant"; content: string }[] = [];
+
+  if (pinnedFormatted) {
+    result.push(pinnedFormatted);
+  }
+
+  result.push(...contextEntries);
+
   return result;
+}
+
+// ── Progressive summarization ──
+
+/** Minimum non-system messages before summarization is triggered. */
+export const SUMMARIZATION_THRESHOLD = 20;
+
+/**
+ * Build the system prompt for the summarization call.
+ */
+export function buildSummarizationSystemPrompt(): string {
+  return `You are a debate summarizer. Your job is to create a concise summary of a multi-participant debate.
+
+CRITICAL RULES:
+1. PRESERVE VERBATIM: all numbers, statistics, percentages, dates, URLs, code snippets, and technical parameters. Never paraphrase or round numbers.
+2. For each participant, state their core position and key arguments (1-2 sentences each).
+3. Note points of agreement and disagreement between participants.
+4. Capture the current state of the debate: what has been resolved, what remains contested.
+5. Keep the summary under 600 words.
+6. Use participant names exactly as given (e.g., "[Kimi K2]", "[Gemma 3]").
+7. Do NOT add your own opinions or analysis. Only summarize what was said.`;
+}
+
+/**
+ * Build input for the summarization call from messages that need to be summarized.
+ * Different from buildContextWindow — uses a flat text format with full attribution,
+ * no role mapping, and file attachments replaced with metadata.
+ */
+export function buildSummarizationInput(
+  messages: Message[],
+  previousSummary?: string
+): string {
+  const parts: string[] = [];
+
+  if (previousSummary) {
+    parts.push(`[Previous context summary]:\n${previousSummary}\n`);
+    parts.push(`[New discussion to incorporate]:`);
+  }
+
+  for (const msg of messages) {
+    if (msg.role === "system") continue;
+
+    let speaker: string;
+    if (msg.role === "user") {
+      speaker = "User";
+    } else {
+      speaker = msg.modelName ?? "Unknown Model";
+    }
+
+    let content = msg.content;
+
+    // Replace file attachment content with metadata to save tokens
+    if (msg.attachment) {
+      content += ` [Attached file: ${msg.attachment.fileName}, ${Math.ceil(msg.attachment.size / 1024)}KB]`;
+    }
+
+    // Compress very long individual messages for the summarization input
+    content = truncateToTokenBudget(content, 500);
+
+    parts.push(`[${speaker}]: ${content}`);
+  }
+
+  return parts.join("\n\n");
+}
+
+/**
+ * Check if summarization should be triggered after a round completes.
+ */
+export function shouldSummarize(
+  messages: Message[],
+  currentSummary: ContextSummary | null
+): boolean {
+  const nonSystemMessages = messages.filter((m) => m.role !== "system");
+
+  if (nonSystemMessages.length < SUMMARIZATION_THRESHOLD) return false;
+
+  if (!currentSummary) return true;
+
+  // Check how many new messages since last summary
+  const lastSummarizedIdx = messages.findIndex(
+    (m) => m.id === currentSummary.throughMessageId
+  );
+
+  // If the summarized message was deleted, re-summarize
+  if (lastSummarizedIdx === -1) return true;
+
+  // Summarize when 10+ new non-system messages since last summary
+  const newMessages = messages
+    .slice(lastSummarizedIdx + 1)
+    .filter((m) => m.role !== "system");
+
+  return newMessages.length >= 10;
+}
+
+/**
+ * Determine which messages should be summarized and which kept as recent context.
+ * Returns the split point: messages[0..splitIdx] go into summary, messages[splitIdx+1..] stay recent.
+ */
+export function getSummarizationSplit(
+  messages: Message[]
+): { toSummarize: Message[]; recentStartIdx: number } {
+  const nonSystemMessages = messages.filter((m) => m.role !== "system");
+
+  // Keep the last 8 non-system messages as recent context
+  const KEEP_RECENT = 8;
+  const keepCount = Math.min(KEEP_RECENT, nonSystemMessages.length);
+  const cutoffMsg = nonSystemMessages[nonSystemMessages.length - keepCount];
+
+  // Find the index of the cutoff message in the full array
+  const cutoffIdx = messages.findIndex((m) => m.id === cutoffMsg.id);
+
+  return {
+    toSummarize: messages.slice(0, cutoffIdx).filter((m) => m.role !== "system"),
+    recentStartIdx: cutoffIdx,
+  };
 }
 
 export const conversationEngine = new ConversationEngine();
