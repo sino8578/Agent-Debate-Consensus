@@ -1,3 +1,5 @@
+export type ThinkingStyle = "skeptic" | "pragmatist" | "visionary" | "analyst" | "devils_advocate";
+
 export interface Model {
   id: string;
   name: string;
@@ -11,6 +13,7 @@ export interface Model {
   };
   description?: string;
   context_length?: number;
+  thinkingStyle?: ThinkingStyle;
 }
 
 export interface FileAttachment {
@@ -20,6 +23,8 @@ export interface FileAttachment {
   size: number;
   truncated: boolean;
 }
+
+export type MessageType = "regular" | "summary";
 
 export interface Message {
   id: string;
@@ -31,6 +36,7 @@ export interface Message {
   modelName?: string;
   timestamp: number;
   isStreaming?: boolean;
+  messageType?: MessageType;
 }
 
 export interface TypingState {

@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useChatStore } from "@/store/chatStore";
 import { Model } from "@/types/chat";
+import { getNextUniqueColor } from "@/lib/models";
 
 interface OpenRouterModel {
   id: string;
@@ -87,15 +88,14 @@ export function ModelDiscoveryModal({ isOpen, onClose }: ModelDiscoveryModalProp
     const shortName =
       orModel.name.split(" ")[0].split(":")[0].split("/").pop() || "AI";
 
-    const colors = ["#ff6482", "#32d583", "#fbbf24", "#60a5fa", "#a78bfa", "#34d399"];
-    const randomColor = colors[Math.floor(Math.random() * colors.length)];
+    const uniqueColor = getNextUniqueColor(availableModels);
 
     const newModel: Model = {
       id: orModel.id,
       name: orModel.name,
       shortName: shortName,
       provider: provider,
-      color: randomColor,
+      color: uniqueColor,
       isActive: false,
       pricing: {
         prompt: orModel.pricing.prompt,

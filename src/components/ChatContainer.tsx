@@ -6,6 +6,7 @@ import {
   conversationEngine,
   buildSystemPrompt,
   buildSummaryPrompt,
+  buildRebuttalAddendum,
   buildContextWindow,
   buildSummarizationSystemPrompt,
   buildSummarizationInput,
@@ -314,9 +315,22 @@ function ChatApp() {
 
       const isModerator = model.id === state.moderatorId;
       const isSummarizer = model.id === conversationEngine.summarizerModelId;
-      const systemPrompt = isSummarizer
-        ? buildSummaryPrompt(model, state.activeModels)
-        : buildSystemPrompt(model, state.activeModels, isModerator);
+      const isRebuttal =
+        conversationEngine.rebuttalPhase &&
+        !conversationEngine.hasGivenRebuttal(modelId) &&
+        !isModerator &&
+        !isSummarizer;
+
+      let systemPrompt: string;
+      if (isSummarizer) {
+        systemPrompt = buildSummaryPrompt(model, state.activeModels);
+      } else {
+        systemPrompt = buildSystemPrompt(model, state.activeModels, isModerator);
+        if (isRebuttal) {
+          systemPrompt += buildRebuttalAddendum();
+        }
+      }
+
       const contextMessages = buildContextWindow(
         state.messages,
         contextWindowSize,
@@ -335,12 +349,16 @@ function ChatApp() {
         maxTokens: MAX_COMPLETION_TOKENS,
       };
 
+      // Mark summary/verdict messages: moderator settle (priority ≤ 50) or random summarizer
+      const isSummaryMessage = (isModerator && priority <= 50) || isSummarizer;
+
       const messageId = addMessage({
         role: "assistant",
         content: "",
         modelId: model.id,
         modelName: model.name,
         isStreaming: true,
+        ...(isSummaryMessage ? { messageType: "summary" as const } : {}),
       });
 
       const result = await new Promise<{ content: string; reasoning: string; error?: Error }>((resolve) => {
@@ -383,6 +401,9 @@ function ChatApp() {
       // ── Empty response ──
       if (!result.content) {
         removeMessage(messageId);
+        if (isRebuttal) {
+          conversationEngine.markRebuttalGiven(modelId);
+        }
         const isDiscussion = conversationEngine.hasResponded(modelId);
         conversationEngine.completeResponse(modelId, isDiscussion);
         conversationEngine.clearRetry(modelId);
@@ -393,6 +414,11 @@ function ChatApp() {
       // ── Success ──
       completeMessage(messageId);
       conversationEngine.clearRetry(modelId);
+
+      // Track rebuttal completion
+      if (isRebuttal) {
+        conversationEngine.markRebuttalGiven(modelId);
+      }
 
       const latestState = useChatStore.getState();
       const isMod = modelId === latestState.moderatorId;
@@ -426,8 +452,12 @@ function ChatApp() {
         if (latestMessage) {
           processModelResponses(latestMessage);
         }
-        // If no models were queued → moderator concluded, round over
+        // If no models were queued → check if rebuttal started (don't end prematurely)
         if (!conversationEngine.hasPendingWork) {
+          if (conversationEngine.rebuttalPhase) {
+            // Rebuttal was triggered from processModelResponses — wait for it
+            return;
+          }
           conversationEngine.markRoundComplete();
           triggerSummarization();
         }
@@ -474,9 +504,30 @@ function ChatApp() {
       }
 
       // When no more models want to respond and no pending work:
-      // → Trigger moderator (or random summarizer) if not yet spoken
+      // → Check rebuttal phase, then trigger moderator/summarizer
       if (!anyQueued && latestMessage.role === "assistant" && !conversationEngine.hasPendingWork) {
-        // Don't re-trigger moderator from its own completion — that's handled in onComplete
+        // ── Rebuttal phase trigger ──
+        // After all openings (and moderator opening if present), before any settle:
+        // give each non-moderator model one rebuttal opportunity.
+        if (!conversationEngine.rebuttalPhase) {
+          const respondedNonMod = state.activeModels.filter(
+            (m) =>
+              !failedModelIds.has(m.id) &&
+              m.id !== state.moderatorId &&
+              conversationEngine.hasResponded(m.id)
+          );
+          if (respondedNonMod.length >= 2) {
+            conversationEngine.enterRebuttalPhase();
+            for (const m of respondedNonMod) {
+              const delay = 1000 + Math.random() * 1500;
+              conversationEngine.queueResponse(m.id, delay, 65);
+            }
+            return; // Wait for rebuttals — don't proceed to settle
+          }
+        }
+
+        // ── Settle logic (existing) ──
+        // Don't re-trigger moderator from its own completion — handled in onComplete
         if (latestMessage.modelId === state.moderatorId) {
           return;
         }

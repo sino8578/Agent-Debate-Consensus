@@ -1,8 +1,9 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { v4 as uuidv4 } from "uuid";
-import { ChatState, Model, Message, Theme, AppMode, TemperaturePreset, DebateSession } from "@/types/chat";
+import { ChatState, Model, Message, Theme, AppMode, TemperaturePreset, DebateSession, ThinkingStyle } from "@/types/chat";
 import { availableModels as defaultModels } from "@/lib/models";
+import { assignThinkingStyle } from "@/lib/conversationEngine";
 
 export const useChatStore = create<ChatState>()(
   persist(
@@ -88,11 +89,25 @@ export const useChatStore = create<ChatState>()(
           // Clear failure when re-activating a model
           const { [modelId]: _, ...cleanedFailed } = state.failedModels;
 
+          if (isCurrentlyActive) {
+            return {
+              activeModels: state.activeModels.filter((m) => m.id !== modelId),
+              failedModels: state.failedModels,
+            };
+          }
+
+          // Assign thinking style from unused pool
+          const usedStyles = new Set(
+            state.activeModels.map((m) => m.thinkingStyle)
+          );
+          const style = assignThinkingStyle(usedStyles);
+
           return {
-            activeModels: isCurrentlyActive
-              ? state.activeModels.filter((m) => m.id !== modelId)
-              : [...state.activeModels, { ...model, isActive: true }],
-            failedModels: isCurrentlyActive ? state.failedModels : cleanedFailed,
+            activeModels: [
+              ...state.activeModels,
+              { ...model, isActive: true, thinkingStyle: style },
+            ],
+            failedModels: cleanedFailed,
           };
         }),
 
@@ -303,9 +318,14 @@ export const useChatStore = create<ChatState>()(
           const session = updatedSessions.find((s) => s.id === id);
           if (!session) return { sessions: updatedSessions };
 
-          const restoredActiveModels = state.availableModels.filter((m) =>
-            session.activeModelIds.includes(m.id)
-          );
+          const usedStyles = new Set<ThinkingStyle | undefined>();
+          const restoredActiveModels = state.availableModels
+            .filter((m) => session.activeModelIds.includes(m.id))
+            .map((m) => {
+              const style = assignThinkingStyle(usedStyles);
+              usedStyles.add(style);
+              return { ...m, isActive: true, thinkingStyle: style };
+            });
 
           return {
             sessions: updatedSessions,
@@ -392,8 +412,8 @@ export const useChatStore = create<ChatState>()(
         contextSummary: state.contextSummary,
       }),
       onRehydrateStorage: () => (state) => {
-        // Clean up stale streaming state that persisted from a page close mid-stream
         if (state) {
+          // Clean up stale streaming state that persisted from a page close mid-stream
           const hasStale = state.messages.some((m) => m.isStreaming);
           if (hasStale) {
             useChatStore.setState({
@@ -402,6 +422,22 @@ export const useChatStore = create<ChatState>()(
               ),
               typingModels: [],
             });
+          }
+
+          // Migrate: assign thinking styles to active models that don't have one
+          const needsStyle = state.activeModels.some((m) => !m.thinkingStyle);
+          if (needsStyle) {
+            const usedStyles = new Set<ThinkingStyle | undefined>();
+            const updatedModels = state.activeModels.map((m) => {
+              if (m.thinkingStyle) {
+                usedStyles.add(m.thinkingStyle);
+                return m;
+              }
+              const style = assignThinkingStyle(usedStyles);
+              usedStyles.add(style);
+              return { ...m, thinkingStyle: style };
+            });
+            useChatStore.setState({ activeModels: updatedModels });
           }
         }
       },

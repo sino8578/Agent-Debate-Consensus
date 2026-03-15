@@ -4,9 +4,22 @@ import React from "react";
 import { Message, Model } from "@/types/chat";
 import { useChatStore } from "@/store/chatStore";
 import { messageToMarkdown } from "@/lib/exportChat";
+import { getThinkingStyleLabel } from "@/lib/conversationEngine";
 import { useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
+
+/**
+ * Sanitization schema based on GitHub's defaults (allows br, table, a, img, etc.).
+ * Adds <mark> for highlighted text. Blocks <script>, <iframe>, <style>, <object>,
+ * <embed>, <form>, and all event handler attributes.
+ */
+const sanitizeSchema = {
+  ...defaultSchema,
+  tagNames: [...(defaultSchema.tagNames ?? []), "mark"],
+};
 
 /**
  * Process React children and replace @mentions with colored spans.
@@ -110,6 +123,7 @@ export function MessageBubble({ message, onBoost }: Props) {
   const [fileExpanded, setFileExpanded] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
   const isUser = message.role === "user";
+  const isSummary = message.messageType === "summary";
   const allModels = [...activeModels, ...availableModels];
   const model = allModels.find((m) => m.id === message.modelId);
   // Deduplicate models for mention highlighting
@@ -214,10 +228,12 @@ export function MessageBubble({ message, onBoost }: Props) {
 
   // AI messages — full Markdown rendering with collapse
   return (
-    <div className="flex justify-start mb-3 animate-fade-in group/msg">
-      <div className="flex gap-2 md:gap-2.5 max-w-[92%] md:max-w-[78%]">
+    <div className={`flex justify-start mb-3 animate-fade-in group/msg ${isSummary ? "mb-4" : ""}`}>
+      <div className={`flex gap-2 md:gap-2.5 ${isSummary ? "max-w-[96%] md:max-w-[85%]" : "max-w-[92%] md:max-w-[78%]"}`}>
         <div
-          className="w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center text-white text-[11px] md:text-[12px] font-semibold flex-shrink-0 mt-5"
+          className={`w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center text-white text-[11px] md:text-[12px] font-semibold flex-shrink-0 mt-5 ${
+            isSummary ? "ring-2 ring-amber-400/60" : ""
+          }`}
           style={{ backgroundColor: model?.color ?? "#3a3a3c" }}
         >
           {avatarLetter}
@@ -231,8 +247,24 @@ export function MessageBubble({ message, onBoost }: Props) {
             >
               {message.modelName ?? "Agent"}
             </span>
-            {message.modelId === moderatorId && (
+            {isSummary && (
+              <span className="inline-flex items-center gap-1 text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-400/15 text-amber-400 border border-amber-400/25">
+                <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                </svg>
+                Summary
+              </span>
+            )}
+            {!isSummary && message.modelId === moderatorId && (
               <span className="text-[9px] text-amber-400" title="Moderator">&#9733; mod</span>
+            )}
+            {!isSummary && model?.thinkingStyle && (
+              <span
+                className="text-[9px] font-medium text-muted/60 uppercase tracking-wider"
+                title={`Thinking style: ${getThinkingStyleLabel(model.thinkingStyle)}`}
+              >
+                {getThinkingStyleLabel(model.thinkingStyle)}
+              </span>
             )}
             <button
               onClick={handleCopy}
@@ -288,8 +320,12 @@ export function MessageBubble({ message, onBoost }: Props) {
           )}
 
           <div
-            className={`bg-surface-light rounded-[18px] md:rounded-[20px] rounded-tl-md px-3 py-2 md:px-4 md:py-2.5 border border-separator relative ${
+            className={`rounded-[18px] md:rounded-[20px] rounded-tl-md px-3 py-2 md:px-4 md:py-2.5 relative ${
               isLongMessage ? "cursor-pointer" : ""
+            } ${
+              isSummary
+                ? "bg-amber-400/[0.04] border-l-[3px] border-l-amber-400/60 border border-amber-400/15"
+                : "bg-surface-light border border-separator"
             }`}
             onClick={() => { if (isLongMessage) setExpanded(!expanded); }}
           >
@@ -305,6 +341,7 @@ export function MessageBubble({ message, onBoost }: Props) {
             >
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
+                rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema]]}
                 components={{
                   p: ({ children }) => <p className="mb-2 last:mb-0">{highlightMentions(children, uniqueModels)}</p>,
                   strong: ({ children }) => <strong className="font-semibold">{highlightMentions(children, uniqueModels)}</strong>,
@@ -360,7 +397,12 @@ export function MessageBubble({ message, onBoost }: Props) {
 
             {/* Gradient fade when collapsed */}
             {isLongMessage && !expanded && (
-              <div className="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-surface-light to-transparent rounded-b-[20px] pointer-events-none" />
+              <div className="absolute bottom-0 left-0 right-0 h-16 rounded-b-[20px] pointer-events-none">
+                <div className="w-full h-full bg-gradient-to-t from-surface-light to-transparent" />
+                {isSummary && (
+                  <div className="absolute inset-0 bg-gradient-to-t from-amber-400/[0.04] to-transparent" />
+                )}
+              </div>
             )}
           </div>
         </div>

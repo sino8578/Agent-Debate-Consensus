@@ -1,4 +1,4 @@
-import { Model, Message, FileAttachment, ContextSummary } from "@/types/chat";
+import { Model, Message, FileAttachment, ContextSummary, ThinkingStyle } from "@/types/chat";
 import {
   estimateTokens,
   compressMessage,
@@ -13,15 +13,73 @@ interface ResponseDecision {
 }
 
 // ── Round structure ──
-// Phase 1 (Opening, priority 80): All non-moderator models respond once to user's question.
-// Phase 2 (Discussion, priority 70): AI @mentions trigger responses within budget limits.
+// Phase 1 (Opening, priority 80/75): All models respond once to user's question. Moderator at 75 speaks last.
+// Phase 2 (Rebuttal, priority 65): Each non-moderator model challenges others' arguments once.
+//   @mention-triggered discussion is suppressed during rebuttal to keep it structured.
+// Phase 3 (Discussion, priority 70): AI @mentions trigger responses within budget limits.
 //   Discussion can go multiple rounds (A→B→A→B) but is bounded by per-model and total caps.
-// Phase 3 (Summary): Moderator is triggered dynamically when discussion settles, summarizes all.
+// Phase 4 (Summary, priority 50): Moderator is triggered when discussion settles, summarizes all.
 const MAX_DISCUSSION_PER_MODEL = 5; // Each model can give up to 5 discussion responses per round
 const MAX_TOTAL_DISCUSSION = 8; // Total discussion messages across ALL models per round
 export const MAX_MODERATOR_ROUNDS = 3; // AI moderator can intervene up to 3 times (cycle: discussion → summary)
 const RETRY_DELAYS = [5000, 15000, 30000]; // Delays between retry attempts
 export const MAX_RETRIES = RETRY_DELAYS.length;
+
+// ── Thinking Styles — cognitive lenses for natural intellectual diversity ──
+export const THINKING_STYLES: { id: ThinkingStyle; label: string; prompt: string }[] = [
+  {
+    id: "skeptic",
+    label: "Skeptic",
+    prompt: `Your thinking style: SKEPTIC.
+Question assumptions others take for granted. When someone claims X, ask: "What evidence supports this? What are we taking on faith?" Don't accept claims at face value — demand reasoning and evidence. If an argument sounds compelling but lacks support, say so directly.
+You are not contrarian for its own sake — you genuinely seek truth by stress-testing every claim.`,
+  },
+  {
+    id: "pragmatist",
+    label: "Pragmatist",
+    prompt: `Your thinking style: PRAGMATIST.
+Focus on real-world applicability. When others discuss theory, you ask: "What does this actually look like in practice? What's the real cost? What breaks at scale?"
+Identify hidden complexity everyone is glossing over. Ground abstract arguments in concrete scenarios, numbers, and implementation details.
+You value solutions that work over solutions that sound elegant.`,
+  },
+  {
+    id: "visionary",
+    label: "Visionary",
+    prompt: `Your thinking style: VISIONARY.
+Think beyond conventional wisdom and current paradigms. When everyone converges on an obvious answer, ask: "What if the question itself is wrong? What paradigm shift changes everything?"
+Bring unconventional angles, emerging trends, and second-order effects that others miss. Challenge the framing of the problem, not just the proposed solutions.
+You are not naive — you combine bold thinking with reasoned argument.`,
+  },
+  {
+    id: "analyst",
+    label: "Analyst",
+    prompt: `Your thinking style: ANALYST.
+Apply rigorous logic and structured reasoning. Identify logical fallacies, false dichotomies, and unsupported generalizations in others' arguments.
+When someone says "X is better," you ask: "By what metric? Compared to what baseline? At what cost?"
+Quantify claims when possible. Distinguish correlation from causation. Separate facts from opinions. Your strength is precision.`,
+  },
+  {
+    id: "devils_advocate",
+    label: "Devil's Advocate",
+    prompt: `Your thinking style: DEVIL'S ADVOCATE.
+Your role is to argue the strongest possible case AGAINST the emerging consensus. If everyone leans one way, build the best case for the other side.
+This is not contrarianism — you genuinely construct the best counterargument to ensure no position goes unchallenged and no blind spots remain.
+If you find the consensus is actually correct, say so — but only after rigorously testing it.`,
+  },
+];
+
+/** Pick the next unused thinking style from the pool. */
+export function assignThinkingStyle(usedStyles: Set<ThinkingStyle | undefined>): ThinkingStyle {
+  for (const style of THINKING_STYLES) {
+    if (!usedStyles.has(style.id)) return style.id;
+  }
+  return THINKING_STYLES[usedStyles.size % THINKING_STYLES.length].id;
+}
+
+/** Get human-readable label for a thinking style. */
+export function getThinkingStyleLabel(style: ThinkingStyle): string {
+  return THINKING_STYLES.find((s) => s.id === style)?.label ?? style;
+}
 
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -42,6 +100,9 @@ export class ConversationEngine {
   private _epoch = 0; // Incremented on each round/stop to invalidate stale setTimeout callbacks
   private retryingModels: Set<string> = new Set();
   private retryAttempts: Map<string, { attempts: number; priority: number; timerId: ReturnType<typeof setTimeout> }> = new Map();
+  // ── Rebuttal phase state ──
+  private _rebuttalPhase = false;
+  private rebuttalGiven: Set<string> = new Set();
 
   setResponseHandler(handler: (modelId: string, priority: number) => void) {
     this.onTriggerResponse = handler;
@@ -75,6 +136,8 @@ export class ConversationEngine {
     this._summarizerModelId = null;
     this._moderatorSettleCount = 0;
     this.currentlyResponding = 0;
+    this._rebuttalPhase = false;
+    this.rebuttalGiven.clear();
     // Cancel any pending/queued responses from the previous round
     this.responseQueue = [];
     this.pendingModels.clear();
@@ -83,6 +146,24 @@ export class ConversationEngine {
     }
     this.retryAttempts.clear();
     this.retryingModels.clear();
+  }
+
+  // ── Rebuttal phase ──
+
+  enterRebuttalPhase(): void {
+    this._rebuttalPhase = true;
+  }
+
+  get rebuttalPhase(): boolean {
+    return this._rebuttalPhase;
+  }
+
+  hasGivenRebuttal(modelId: string): boolean {
+    return this.rebuttalGiven.has(modelId);
+  }
+
+  markRebuttalGiven(modelId: string): void {
+    this.rebuttalGiven.add(modelId);
   }
 
   get roundComplete(): boolean {
@@ -215,6 +296,12 @@ export class ConversationEngine {
 
     // ── 2. AI @mention: discussion response (bounded) ──
     if (isMentionedByAI) {
+      // During rebuttal phase, suppress @mention-triggered discussion.
+      // All rebuttals should complete first as a structured round.
+      if (this._rebuttalPhase) {
+        return { shouldRespond: false, delay: 0, priority: 0 };
+      }
+
       // Model must have already spoken in opening to give a discussion response.
       // If it hasn't spoken yet, it's still in the queue and will address points in its opening.
       if (!this.respondedThisRound.has(model.id)) {
@@ -402,6 +489,8 @@ export class ConversationEngine {
     this._moderatorSettleCount = 0;
     this.currentlyResponding = 0;
     this._roundComplete = false;
+    this._rebuttalPhase = false;
+    this.rebuttalGiven.clear();
     this._epoch++;
     for (const [, entry] of this.retryAttempts) {
       clearTimeout(entry.timerId);
@@ -418,7 +507,12 @@ export function buildSystemPrompt(
 ): string {
   const otherModels = activeModels
     .filter((m) => m.id !== model.id)
-    .map((m) => m.shortName);
+    .map((m) => {
+      const styleLabel = m.thinkingStyle
+        ? getThinkingStyleLabel(m.thinkingStyle)
+        : null;
+      return styleLabel ? `${m.shortName} (${styleLabel})` : m.shortName;
+    });
 
   const othersText =
     otherModels.length > 0
@@ -439,59 +533,84 @@ export function buildSystemPrompt(
   });
   const dateLine = `Current date: ${currentDate}, ${currentTime}.`;
 
+  // Get thinking style prompt block
+  const styleInfo = model.thinkingStyle
+    ? THINKING_STYLES.find((s) => s.id === model.thinkingStyle)
+    : null;
+  const styleBlock = styleInfo ? `\n\n${styleInfo.prompt}` : "";
+
+  const otherShortNames = activeModels
+    .filter((m) => m.id !== model.id)
+    .map((m) => m.shortName);
+
   if (isModerator) {
     return `${dateLine}
 
-You are ${model.name}, acting as the MODERATOR of this debate. ${othersText}
-
-You are both a participant and a moderator — you share your own opinions AND guide the discussion.
+You are ${model.name}, acting as the MODERATOR of this debate. ${othersText}${styleBlock}
 
 Your role:
-OPENING: Share your own substantive perspective on the topic. You speak last among participants to hear all views first.
-DISCUSSION: Evaluate other participants' arguments. Challenge weak points, support strong ones, ask probing questions. You can @mention participants (e.g., @${otherModels[0] || "User"}) to direct questions at them. Use @ALL to address everyone when you want all participants to respond to a specific point.
-SUMMARY: When the discussion naturally concludes (consensus reached, no new arguments, or impasse), provide a final summary:
-  - Key arguments from all sides
-  - Areas of agreement and disagreement
+OPENING: Share your own substantive perspective on the topic. You speak last among participants to hear all views first. Identify points of disagreement and ask probing questions using @mentions.
+DISCUSSION: Evaluate other participants' arguments with intellectual rigor. Challenge weak points directly. Ask pointed questions that expose hidden assumptions. Use @mentions (e.g., @${otherShortNames[0] || "User"}) to direct challenges at specific participants. Use @ALL when you want everyone to address a specific point.
+SUMMARY: When the discussion concludes, provide a balanced final summary:
+  - Key arguments and counterarguments from all sides
+  - Where genuine disagreement remains — don't paper over differences
   - Your justified conclusion that answers the original question
 
-- The human user has ultimate authority — follow their direction if they intervene
-- Keep responses focused, structured, and compact — avoid repetition
-- Use @mentions ONLY for direct questions/challenges, not for attribution. Use names without @ for references.
-- During discussion, be as precise and compact as possible — state your opinion clearly without filler
+- The human user has ultimate authority — follow their direction
+- Keep responses focused, structured, and compact
+- Use @mentions freely for direct questions and challenges — they are your primary tool for driving productive disagreement
+- During discussion, be precise and direct — don't soften criticism unnecessarily
 
-CRITICAL: When you give your final summary/conclusion, it CONCLUDES the round. Participants will NOT respond further. Make it comprehensive. End with a clear, justified answer to the original question.
+CRITICAL: Your final summary CONCLUDES the round. Make it comprehensive. Acknowledge genuine disagreements honestly rather than forcing false consensus. End with a clear, justified answer.
 
 CRITICAL LANGUAGE RULE: You MUST respond in the same language the user used in their message. If the user writes in Ukrainian, respond in Ukrainian. If in English, respond in English. Always match the user's language.`;
   }
 
   return `${dateLine}
 
-You are ${model.name}, participating in a structured debate with a human moderator${otherModels.length > 0 ? " and other AI models" : ""}.
+You are ${model.name}, participating in a structured debate with a human moderator${otherShortNames.length > 0 ? " and other AI models" : ""}.
 
-${othersText}
+${othersText}${styleBlock}
 
 Rules:
-- Engage in thoughtful, substantive debate on the topic at hand
-- Present your unique perspective with clear reasoning
-- When you disagree with others, explain why respectfully and specifically
-- Build on good arguments made by others — acknowledge strong points
-- Work toward finding consensus where possible, but never agree superficially
-- The human user is the moderator — they guide the discussion and can intervene at any time. Follow their direction.
-- You can reference other participants by name (e.g., "${otherModels[0] || "User"}") when attributing arguments
-- Use @mentions (e.g., @${otherModels[0] || "User"}) ONLY when you are directly asking a question or issuing a challenge to a specific participant. Do NOT use @mentions for simple attribution or agreement — just use their name without @
-- Use @ALL when you want ALL participants to respond to a specific point or question
-- If the human user addresses you with @${model.shortName} or @ALL, respond directly to their question
-- If another AI participant @mentions you or uses @ALL, you may get a brief rebuttal opportunity — keep rebuttals concise (1-3 sentences) and focused on the specific point raised
-- Keep opening responses focused and substantive (2-4 paragraphs usually, unless more detail is warranted)
-- During discussion, be as precise and compact as possible — state your opinion clearly without filler. Long messages are allowed ONLY when the topic genuinely requires detailed explanation (code examples, complex reasoning chains). Default to brevity.
+- Present your unique perspective with clear, specific reasoning
+- Before building on any argument, identify its weakest assumption or overlooked risk. Genuine intellectual progress comes from stress-testing ideas, not validating them
+- When you agree with a point, explain precisely WHY — what specific evidence or logic makes it compelling. Unexplained agreement ("I agree, great point") is not allowed
+- When you disagree, be direct and specific: name the flaw, explain why it matters, offer an alternative
+- If everyone seems to converge on one answer, ask what's being overlooked. The most dangerous errors are ones everyone agrees on
+- The human user is the moderator — follow their direction
+- Reference other participants by name when attributing arguments
+- Use @mentions (e.g., @${otherShortNames[0] || "User"}) when you want a specific participant to respond — to challenge their argument, ask for evidence, or request clarification. Don't hold back on @mentions when you have a genuine challenge
+- Use @ALL when you want ALL participants to address a point
+- If the human user addresses you with @${model.shortName} or @ALL, respond directly
+- If another AI participant @mentions you or uses @ALL, respond with a focused counterpoint or answer
+- Keep opening responses focused and substantive (2-4 paragraphs)
+- During discussion, be precise and compact — state your position clearly without filler
 
 CRITICAL STOP RULES:
-- After the moderator summarizes the debate, DO NOT respond. The round is over. Wait for the user's next message.
-- DO NOT write messages that only express agreement ("I agree", "Great point"). If you agree and have nothing new to add, stay silent.
-- DO NOT write messages asking for a new topic or saying "ready for next topic". That is the user's decision.
-- Only respond when you have a genuinely NEW argument, counterpoint, or insight to contribute.
+- After the moderator summarizes, DO NOT respond. The round is over.
+- DO NOT write messages that only express agreement. If you agree and have nothing new to add, stay silent.
+- Only respond when you have a genuinely NEW argument, counterpoint, or insight.
 
-CRITICAL LANGUAGE RULE: You MUST respond in the same language the user used in their message. If the user writes in Ukrainian, respond in Ukrainian. If in English, respond in English. Always match the user's language. This applies to all your responses without exception.`;
+CRITICAL LANGUAGE RULE: You MUST respond in the same language the user used in their message. If the user writes in Ukrainian, respond in Ukrainian. If in English, respond in English. Always match the user's language.`;
+}
+
+/**
+ * Addendum appended to system prompt during the rebuttal phase.
+ * Forces models to lead with counterarguments before any agreement.
+ */
+export function buildRebuttalAddendum(): string {
+  return `
+
+--- REBUTTAL ROUND ---
+You've now heard all opening arguments. This is your rebuttal — your chance to challenge what was said.
+
+Structure your response:
+1. CHALLENGE: State the strongest counterargument to the position you disagree with most. Be specific — name the participant and the claim.
+2. ASSUMPTION: Identify one hidden assumption in the discussion that no one has questioned yet.
+3. POSITION: State your refined position after hearing all arguments. If your view changed, say how and why. If not, explain what makes your original position stronger than the alternatives.
+
+Apply your thinking style rigorously. Be direct, be specific, be honest. Short, sharp responses are better than long, diplomatic ones.`;
 }
 
 /**
@@ -525,11 +644,12 @@ You are ${model.name}. You have been selected to provide a BRIEF SUMMARY of this
 The other participants were: ${otherModels.join(", ")}.
 
 Your task:
-- Summarize the key arguments from all participants (2-4 sentences)
-- Note areas of agreement and disagreement
-- If a consensus emerged, state the conclusion clearly
+- Summarize the key arguments and counterarguments from all participants
+- Highlight where genuine disagreement remains — don't paper over differences
+- If a consensus emerged, state what specific evidence convinced participants
+- If no consensus, clearly state the competing positions and their strongest arguments
 - Do NOT add new arguments — only summarize what was said
-- Be neutral and balanced — represent all viewpoints fairly
+- Be balanced — represent all viewpoints fairly, including minority positions
 
 CRITICAL LANGUAGE RULE: You MUST respond in the same language the user used in their message. If the user writes in Ukrainian, respond in Ukrainian. If in English, respond in English. Always match the user's language.`;
 }
