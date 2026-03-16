@@ -500,6 +500,30 @@ export class ConversationEngine {
   }
 }
 
+/**
+ * Rules prefix for non-moderator debate participants.
+ * Placed first in the system prompt for prompt caching — identical prefix
+ * across models allows providers (OpenRouter/Claude/GPT) to cache and
+ * discount repeated input tokens within the same round.
+ */
+const PARTICIPANT_RULES_PREFIX = `You are an AI participant in a structured debate moderated by a human user.
+
+Rules:
+- Present your unique perspective with clear, specific reasoning
+- Before building on any argument, identify its weakest assumption or overlooked risk. Genuine intellectual progress comes from stress-testing ideas, not validating them
+- When you agree with a point, explain precisely WHY — what specific evidence or logic makes it compelling. Unexplained agreement is not allowed
+- When you disagree, be direct and specific: name the flaw, explain why it matters, offer an alternative
+- If everyone converges on one answer, ask what's being overlooked. The most dangerous errors are ones everyone agrees on
+- The human user is the moderator — follow their direction
+- Reference other participants by name when attributing arguments
+- Use @mentions to challenge specific participants, ask for evidence, or request clarification
+- Use @ALL when you want all participants to address a point
+- If you are @mentioned or @ALL is used, respond with a focused counterpoint or answer
+- Keep opening responses focused and substantive (2-4 paragraphs)
+- During discussion, be precise and compact — state your position clearly without filler
+- Do not respond after the moderator summarizes — the round is over. Do not write messages that only express agreement; stay silent if you have nothing new to add. Only respond with genuinely new arguments or counterpoints
+- Respond in the same language the user writes in`;
+
 export function buildSystemPrompt(
   model: Model,
   activeModels: Model[],
@@ -519,19 +543,7 @@ export function buildSystemPrompt(
       ? `The other AI participants are: ${otherModels.join(", ")}.`
       : "You are the only AI in this chat.";
 
-  const now = new Date();
-  const currentDate = now.toLocaleDateString("en-US", {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
-  const currentTime = now.toLocaleTimeString("en-US", {
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZoneName: "short",
-  });
-  const dateLine = `Current date: ${currentDate}, ${currentTime}.`;
+  const shortDate = new Date().toISOString().split("T")[0];
 
   // Get thinking style prompt block
   const styleInfo = model.thinkingStyle
@@ -539,18 +551,13 @@ export function buildSystemPrompt(
     : null;
   const styleBlock = styleInfo ? `\n\n${styleInfo.prompt}` : "";
 
-  const otherShortNames = activeModels
-    .filter((m) => m.id !== model.id)
-    .map((m) => m.shortName);
-
   if (isModerator) {
-    return `${dateLine}
-
-You are ${model.name}, acting as the MODERATOR of this debate. ${othersText}${styleBlock}
+    return `${shortDate}. You are ${model.name}, acting as the MODERATOR of this debate. ${othersText}
+Your @mention handle is @${model.shortName}.${styleBlock}
 
 Your role:
 OPENING: Share your own substantive perspective on the topic. You speak last among participants to hear all views first. Identify points of disagreement and ask probing questions using @mentions.
-DISCUSSION: Evaluate other participants' arguments with intellectual rigor. Challenge weak points directly. Ask pointed questions that expose hidden assumptions. Use @mentions (e.g., @${otherShortNames[0] || "User"}) to direct challenges at specific participants. Use @ALL when you want everyone to address a specific point.
+DISCUSSION: Evaluate other participants' arguments with intellectual rigor. Challenge weak points directly. Ask pointed questions that expose hidden assumptions. Use @mentions to direct challenges at specific participants. Use @ALL when you want everyone to address a specific point.
 SUMMARY: When the discussion concludes, provide a balanced final summary:
   - Key arguments and counterarguments from all sides
   - Where genuine disagreement remains — don't paper over differences
@@ -561,38 +568,15 @@ SUMMARY: When the discussion concludes, provide a balanced final summary:
 - Use @mentions freely for direct questions and challenges — they are your primary tool for driving productive disagreement
 - During discussion, be precise and direct — don't soften criticism unnecessarily
 
-CRITICAL: Your final summary CONCLUDES the round. Make it comprehensive. Acknowledge genuine disagreements honestly rather than forcing false consensus. End with a clear, justified answer.
-
-CRITICAL LANGUAGE RULE: You MUST respond in the same language the user used in their message. If the user writes in Ukrainian, respond in Ukrainian. If in English, respond in English. Always match the user's language.`;
+Your final summary CONCLUDES the round. Make it comprehensive. Acknowledge genuine disagreements honestly rather than forcing false consensus. End with a clear, justified answer.
+Respond in the same language the user writes in.`;
   }
 
-  return `${dateLine}
+  return `${PARTICIPANT_RULES_PREFIX}
 
-You are ${model.name}, participating in a structured debate with a human moderator${otherShortNames.length > 0 ? " and other AI models" : ""}.
-
-${othersText}${styleBlock}
-
-Rules:
-- Present your unique perspective with clear, specific reasoning
-- Before building on any argument, identify its weakest assumption or overlooked risk. Genuine intellectual progress comes from stress-testing ideas, not validating them
-- When you agree with a point, explain precisely WHY — what specific evidence or logic makes it compelling. Unexplained agreement ("I agree, great point") is not allowed
-- When you disagree, be direct and specific: name the flaw, explain why it matters, offer an alternative
-- If everyone seems to converge on one answer, ask what's being overlooked. The most dangerous errors are ones everyone agrees on
-- The human user is the moderator — follow their direction
-- Reference other participants by name when attributing arguments
-- Use @mentions (e.g., @${otherShortNames[0] || "User"}) when you want a specific participant to respond — to challenge their argument, ask for evidence, or request clarification. Don't hold back on @mentions when you have a genuine challenge
-- Use @ALL when you want ALL participants to address a point
-- If the human user addresses you with @${model.shortName} or @ALL, respond directly
-- If another AI participant @mentions you or uses @ALL, respond with a focused counterpoint or answer
-- Keep opening responses focused and substantive (2-4 paragraphs)
-- During discussion, be precise and compact — state your position clearly without filler
-
-CRITICAL STOP RULES:
-- After the moderator summarizes, DO NOT respond. The round is over.
-- DO NOT write messages that only express agreement. If you agree and have nothing new to add, stay silent.
-- Only respond when you have a genuinely NEW argument, counterpoint, or insight.
-
-CRITICAL LANGUAGE RULE: You MUST respond in the same language the user used in their message. If the user writes in Ukrainian, respond in Ukrainian. If in English, respond in English. Always match the user's language.`;
+---
+${shortDate}. You are ${model.name}. Your @mention handle is @${model.shortName}.
+${othersText}${styleBlock}`;
 }
 
 /**
@@ -624,22 +608,9 @@ export function buildSummaryPrompt(
     .filter((m) => m.id !== model.id)
     .map((m) => m.shortName);
 
-  const now = new Date();
-  const currentDate = now.toLocaleDateString("en-US", {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
-  const currentTime = now.toLocaleTimeString("en-US", {
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZoneName: "short",
-  });
+  const shortDate = new Date().toISOString().split("T")[0];
 
-  return `Current date: ${currentDate}, ${currentTime}.
-
-You are ${model.name}. You have been selected to provide a BRIEF SUMMARY of this debate round.
+  return `${shortDate}. You are ${model.name}. You have been selected to provide a BRIEF SUMMARY of this debate round.
 
 The other participants were: ${otherModels.join(", ")}.
 
@@ -650,8 +621,7 @@ Your task:
 - If no consensus, clearly state the competing positions and their strongest arguments
 - Do NOT add new arguments — only summarize what was said
 - Be balanced — represent all viewpoints fairly, including minority positions
-
-CRITICAL LANGUAGE RULE: You MUST respond in the same language the user used in their message. If the user writes in Ukrainian, respond in Ukrainian. If in English, respond in English. Always match the user's language.`;
+- Respond in the same language the user writes in`;
 }
 
 function formatUserContent(
@@ -825,7 +795,7 @@ export function buildContextWindow(
 // ── Progressive summarization ──
 
 /** Minimum non-system messages before summarization is triggered. */
-export const SUMMARIZATION_THRESHOLD = 20;
+export const SUMMARIZATION_THRESHOLD = 14;
 
 /**
  * Build the system prompt for the summarization call.
@@ -906,12 +876,12 @@ export function shouldSummarize(
   // If the summarized message was deleted, re-summarize
   if (lastSummarizedIdx === -1) return true;
 
-  // Summarize when 10+ new non-system messages since last summary
+  // Summarize when 7+ new non-system messages since last summary
   const newMessages = messages
     .slice(lastSummarizedIdx + 1)
     .filter((m) => m.role !== "system");
 
-  return newMessages.length >= 10;
+  return newMessages.length >= 7;
 }
 
 /**
