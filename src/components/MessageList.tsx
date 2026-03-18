@@ -14,6 +14,11 @@ export function MessageList({ onBoost }: Props) {
   const messages = useChatStore((state) => state.messages);
   const typingModels = useChatStore((state) => state.typingModels);
   const activeModels = useChatStore((state) => state.activeModels);
+  // Shared props lifted here so MessageBubble (React.memo) can skip re-renders
+  // during streaming — these rarely change compared to message updates.
+  const availableModels = useChatStore((state) => state.availableModels);
+  const fontSize = useChatStore((state) => state.fontSize);
+  const moderatorId = useChatStore((state) => state.moderatorId);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [isAtBottom, setIsAtBottom] = useState(true);
@@ -207,7 +212,15 @@ export function MessageList({ onBoost }: Props) {
         <>
           <TopicBanner />
           {messages.map((message) => (
-            <MessageBubble key={message.id} message={message} onBoost={onBoost} />
+            <MessageBubble
+              key={message.id}
+              message={message}
+              activeModels={activeModels}
+              availableModels={availableModels}
+              fontSize={fontSize}
+              moderatorId={moderatorId}
+              onBoost={onBoost}
+            />
           ))}
         </>
       )}
